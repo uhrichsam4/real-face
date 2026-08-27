@@ -24,6 +24,7 @@ There is nothing to install and nothing to build.
 
 1. Download `face-perspective-simulator.html`.
 2. Open it in a browser.
+3. Point the camera at your face and turn your head slowly left and right when asked. That builds your 3D face model, which takes a few seconds and unlocks the simulator. It is saved on your device, so this happens once.
 
 That's the whole thing — it's one self-contained file. (It fetches the face-tracking library and model from a public CDN the first time it runs, so the first load needs an internet connection. See [Privacy](#privacy).)
 
@@ -178,9 +179,11 @@ Supporting machinery: landmarks are smoothed with a **One Euro filter** (adaptiv
 
 ---
 
-## The personal 3D face scan
+## The personal 3D face scan — required before you can simulate
 
-A single frame gives only an *estimated* depth per landmark. The scan replaces it with a measured one.
+A single frame gives only an *estimated* depth per landmark, regularised toward an average face. The scan replaces it with a measured one, and **the simulator stays locked until you have built one.** That is deliberate: every number the app then shows you — the distances, the equivalent focal length, the warp itself — is derived from that depth, so letting you drag the slider against a guess would be presenting an estimate as a measurement.
+
+The camera path therefore opens straight into the scan. Once it succeeds the controls appear, the model is saved on your device, and you never see the scan again unless you ask for it (Advanced → Rescan). Loading a photo before you have scanned offers the scan first; if you decline, or if the device has no camera at all, the app falls back to the single-frame estimate and says so.
 
 **The insight:** if you turn your head while the app watches, the same landmark is seen from several directions, and a landmark's depth `d` shows up in the accurately-measured image-x coordinate as `sin(yaw) · d`. Fusing keyframes across yaw therefore recovers real, personal facial depth instead of a generic estimate.
 
@@ -199,6 +202,7 @@ A single frame gives only an *estimated* depth per landmark. The scan replaces i
 - The depth field driving the warp comes from a **multi-view solve** instead of a single-frame monocular estimate — the app fits the stored model onto each live frame with a similarity transform and substitutes its z entirely.
 - Depth becomes **personal**: an actually-prominent nose stays prominent instead of being pulled toward the tracker's average face. The developer panel reports nose depth in millimetres, so the before/after is directly readable, and the **"3D scan depth" toggle flips between scanned and single-frame depth live** so you can see the difference on the same face at the same distance.
 - It **carries over to photos**: scan once with the camera, then load a photo of the same person and the measured geometry is used there too.
+- It is **checked against the face on screen, every frame.** A scan models one face; fitted to someone else it cannot line up. The app measures the in-plane residual of that fit, normalised by face width — about 0.006 fitting the face it was built from versus about 0.35 fitting a different face, a 58× gap — and if the fit fails (reject above 0.09, re-accept below 0.06, hysteresis to survive expressions and head turns) it silently reverts to the single-frame estimate and tells you: *"This isn't the face you scanned — using estimated depth."* So a scan can never be quietly applied to the wrong face.
 - Exported `.obj` files record which was used in their header comment (`from personal 3D scan` vs `single-frame depth estimate`).
 
 The model is stored in `localStorage` under the key `fps.facescan.v1` — on your device, never transmitted — and can be cleared from the Advanced panel at any time.

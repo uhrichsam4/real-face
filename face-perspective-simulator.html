@@ -226,6 +226,12 @@ input[type=range].mini::-webkit-slider-runnable-track{height:5px}
   background:rgba(0,0,0,.42);border:1px solid var(--stroke);color:var(--dim);pointer-events:none;white-space:nowrap;
   bottom:auto;top:calc(58px + var(--st))
 }
+/* locked: the simulator chrome is hidden until the 3D scan exists */
+body.gated #panel{display:none}
+body.gated .tools .tbtn{display:none}
+body.gated .tools #btnMirror,body.gated .tools #btnSource{display:grid}
+body.gated .brand .privacy{color:var(--accent)}
+
 /* 3D scan overlay */
 #scanui{
   position:absolute;z-index:35;left:50%;top:50%;transform:translate(-50%,-50%);
@@ -267,7 +273,8 @@ input[type=range].mini::-webkit-slider-runnable-track{height:5px}
 .bigbtn.primary{background:#fff;color:#000}
 .bigbtn.ghost{background:rgba(120,120,128,.26);color:#fff;border:1px solid var(--stroke)}
 .bigbtn svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-#intro .note{margin-top:26px;font-size:11.5px;color:var(--dim2);text-align:center;max-width:360px;line-height:1.5}
+#intro .step{margin-top:18px;font-size:12.5px;color:var(--dim);text-align:center;max-width:330px;line-height:1.5}
+#intro .note{margin-top:18px;font-size:11.5px;color:var(--dim2);text-align:center;max-width:360px;line-height:1.5}
 
 /* error card */
 #errcard{
@@ -492,6 +499,7 @@ body.immersive #panel .meta,body.immersive #advToggle,body.immersive .compare-ro
         UPLOAD PHOTO
       </button>
     </div>
+    <p class="step">Starts with a quick 3D face scan — turn your head for a few seconds. That measurement is what makes the simulation accurate rather than approximate.</p>
     <p class="note">Perspective simulation is approximate and depends on source camera distance and face-depth estimation. Your camera frames and photos never leave your device — the face-tracking model itself is downloaded once from a public CDN.</p>
   </div>
 
@@ -1139,7 +1147,8 @@ class FaceModel{
     this.dRangeSm = 0.05;
     this.geom = null;
   }
-  reset(){ this.euro.reset(); this.hasDisp=false; this.tris=null; this.triYaw=999; }
+  reset(){ this.euro.reset(); this.hasDisp=false; this.tris=null; this.triYaw=999;
+           this.fitSm=undefined; this.scanOk=undefined; this.scanRejected=false; }
 
   /** feed one detection (array of {x,y,z} normalised landmarks) */
   ingest(lms, dt, smoothing){
@@ -1177,11 +1186,20 @@ class FaceModel{
     for(let i=0;i<NLM;i++) Z[i]=d[i*3+2]*A;
     this.rawZ = this.rawZ && this.rawZ.length===NLM ? this.rawZ : new Float32Array(NLM);
     this.rawZ.set(Z);
-    /* a personal 3D scan replaces the single-frame depth estimate entirely */
-    this.usingScan=false;
+    /* A personal 3D scan replaces the single-frame depth estimate entirely —
+       but only while it demonstrably fits the face actually on screen. */
+    this.usingScan=false; this.scanRejected=false;
     if(opt.scan && opt.scan.model){
       const zs=opt.scan.applyTo(U,V,Z);
-      if(zs){ Z.set(zs); this.usingScan=true; }
+      if(zs){
+        const r=opt.scan.residual;
+        this.fitSm = this.fitSm===undefined ? r : this.fitSm + (r-this.fitSm)*0.25;
+        if(this.scanOk===undefined) this.scanOk = this.fitSm < SCAN_FIT_REJECT;
+        else if(this.scanOk && this.fitSm > SCAN_FIT_REJECT) this.scanOk=false;
+        else if(!this.scanOk && this.fitSm < SCAN_FIT_ACCEPT) this.scanOk=true;
+        if(this.scanOk){ Z.set(zs); this.usingScan=true; }
+        else this.scanRejected=true;
+      }
     }
 
     const sl=IDX.sideL, sr=IDX.sideR;
@@ -1342,6 +1360,12 @@ class Tracker{
      3. repeat, then gauge-fix back onto the frontal frame.
    ========================================================================== */
 const SCAN_WZ = 0.22;              // how much we trust a single frame's z
+/* A personal scan models ONE face. Fitted to a different face it cannot line
+   up, and its depth would then be worse than the per-frame estimate. Measured:
+   ~0.006 of face width fitting the face it was built from, ~0.35 fitting a
+   different face — so these thresholds sit in a very wide empty gap.
+   Hysteresis keeps expression and head-turn wobble from flickering the state. */
+const SCAN_FIT_REJECT = 0.09, SCAN_FIT_ACCEPT = 0.06;
 const SCAN_BINS = 13, SCAN_BIN_DEG = 7;
 const SCAN_STORE = "fps.facescan.v1";
 
@@ -1436,7 +1460,7 @@ class FaceScan{
     this.model=null;      // Float32Array(NLM*3), personal 3D face
     this.quality=0;       // 0..1
     this.span=0;
-    this.fit=null; this.fitZ=new Float32Array(NLM);
+    this.fit=null; this.fitZ=new Float32Array(NLM); this.residual=0;
     this.load();
   }
   reset(){ this.frames=[]; this.bins.fill(0); }
@@ -1533,6 +1557,20 @@ class FaceScan{
     for(let i=0;i<NLM;i++){ meas[i*3]=U[i]; meas[i*3+1]=V[i]; meas[i*3+2]=Z[i]; }
     const T=similarityFit(this.model, meas, NLM);
     const R=T.R, s=T.s, t=T.t, P=this.model, out=this.fitZ;
+    /* Residual of the in-plane fit. The scan is a model of ONE face; fitted to a
+       different face it cannot line up, and using its depth would then be worse
+       than the per-frame estimate. Measure the disagreement and let the caller
+       decide. Normalised by face width so it is scale-free. */
+    let err=0, n=0, w=0;
+    for(let i=0;i<468;i+=2){
+      const x=P[i*3],y=P[i*3+1],z=P[i*3+2];
+      const px=s*(R[0]*x+R[1]*y+R[2]*z)+t[0];
+      const py=s*(R[3]*x+R[4]*y+R[5]*z)+t[1];
+      const dx=px-meas[i*3], dy=py-meas[i*3+1];
+      err+=dx*dx+dy*dy; n++;
+    }
+    w=Math.hypot(meas[IDX.sideR*3]-meas[IDX.sideL*3], meas[IDX.sideR*3+1]-meas[IDX.sideL*3+1]);
+    this.residual = (n && w>1e-6) ? Math.sqrt(err/n)/w : 1;
     for(let i=0;i<NLM;i++){
       const x=P[i*3],y=P[i*3+1],z=P[i*3+2];
       out[i]=s*(R[6]*x+R[7]*y+R[8]*z)+t[2];
@@ -1591,6 +1629,8 @@ const S = {
   immersive:false,
   useScan:true,        // use the personal 3D scan for depth when one exists
   scanning:false,
+  gateScan:true,       // require a personal 3D scan before the simulator unlocks
+  gateBypassed:false,  // set only when no camera exists to scan with
   view3d:0,            // 0 = off, 1 = textured, 2 = shaded clay
   yaw3d:0, pitch3d:0, spin3d:true, spinT:0
 };
@@ -1603,7 +1643,7 @@ const R = {
   view:{z:1,cx:0,cy:0,rot:0}, viewSm:{z:0,cx:0,cy:0,rot:0}, viewInit:false,
   fps:60, frameMs:0, trackerFps:0, trackerMs:0, lastFrame:0,
   running:false, modelReady:false, synthetic:false, devices:[],
-  scan:null, scanBuf:null, lastScanAt:0
+  scan:null, scanBuf:null, lastScanAt:0, scanRequired:false
 };
 
 /* ------------------------------- DOM refs --------------------------------- */
@@ -1631,6 +1671,10 @@ function setStatus(text, kind, autoHide){
 }
 function showError(title, msg, opts){
   opts=opts||{};
+  el.errRetry.textContent="Try Again";           // reset labels a previous card may have set
+  el.errUpload.textContent="Upload Photo Instead";
+  el.errClose.textContent="Dismiss";
+  el.errClose.onclick=null;
   el.errTitle.textContent=title; el.errMsg.textContent=msg;
   el.errRetry.classList.toggle("hide", !opts.retry);
   el.errUpload.classList.toggle("hide", !opts.upload);
@@ -1638,7 +1682,7 @@ function showError(title, msg, opts){
   el.errcard.classList.remove("hide");
   R.errRetry = opts.onRetry||null;
 }
-function hideError(){ el.errcard.classList.add("hide"); }
+function hideError(){ el.errcard.classList.add("hide"); el.errClose.onclick=null; }
 
 /* ---------------------------- unit helpers -------------------------------- */
 const srcM = ()=>S.srcFt*FT;
@@ -2018,6 +2062,8 @@ function updateDebug(){
   el.dFocal.textContent=(S.sizeLock?(tgtM()/srcM()):1).toFixed(3)+"×";
   el.dFw.textContent=g?(g.faceFracW*100).toFixed(1)+"% w":"—";
   el.dNose.textContent=g?(g.noseDepth*1000).toFixed(1)+" mm":"—";
+  el.dConf.textContent += R.fm.usingScan ? " · scan fit "+(R.scan&&R.scan.residual!=null?R.scan.residual.toFixed(3):"—")
+                        : (R.fm.scanRejected ? " · scan rejected" : "");
   el.dYaw.textContent=g?g.yaw.toFixed(1)+"°":"—";
   el.dPitch.textContent=g?g.pitch.toFixed(1)+"°":"—";
   el.dRoll.textContent=g?g.roll.toFixed(1)+"°":"—";
@@ -2275,6 +2321,10 @@ function loop(now){
   if(now-lastUIat>100){
     lastUIat=now; updateUI(); updateDebug(); updateTrackStatus(now);
     if(S.scanning) updateScanUI();
+    if(R.fm.scanRejected && !R.scanWarned && !S.scanning){
+      R.scanWarned=true;
+      setStatus("This isn't the face you scanned — using estimated depth","err",4200);
+    } else if(R.fm.usingScan && R.scanWarned){ R.scanWarned=false; }
   }
 }
 
@@ -2346,8 +2396,12 @@ async function startCamera(deviceId){
         ? "Browsers only allow camera access from a secure page. Open this file in Chrome, or serve the folder locally (python3 -m http.server) and load it over http://localhost — or just upload a photo."
         : "This browser does not expose camera access. Try Chrome, Edge, Firefox or Safari — or upload a photo.";
     }
+    if(needsScan()){
+      msg += " Without a camera the 3D scan is not possible, so photo mode will fall back to estimated depth.";
+    }
     showError(title,msg,{retry:true,upload:true,onRetry:()=>startCamera(S.deviceId)});
     setStatus("Camera unavailable","err",3000);
+    R.cameraFailed=true;
     return false;
   }
   R.stream=stream;
@@ -2367,11 +2421,25 @@ async function startCamera(deviceId){
   S.deviceId = track && track.getSettings ? (track.getSettings().deviceId||null) : null;
   listCameras();
   const ok=await ensureModel();
-  if(ok){ await R.tr.setMode("VIDEO"); setStatus("Finding face…","load"); }
-  updateUI();
+  if(ok){
+    await R.tr.setMode("VIDEO");
+    setStatus("Finding face…","load");
+    if(needsScan()) waitForFaceThenScan();
+    else if(R.scan && R.scan.model) setStatus("Using your saved 3D face scan","ok",2600);
+  }
+  updateUI(); updateLock();
   return true;
 }
+/** the required scan starts by itself as soon as a face is locked */
+function waitForFaceThenScan(){
+  clearInterval(R.gateTimer);
+  R.gateTimer=setInterval(()=>{
+    if(S.source!=="camera" || !needsScan() || S.scanning){ clearInterval(R.gateTimer); return; }
+    if(R.detected){ clearInterval(R.gateTimer); startScan(true); }
+  }, 250);
+}
 function stopStream(){
+  clearInterval(R.gateTimer);
   if(R.stream){ R.stream.getTracks().forEach(t=>{try{t.stop();}catch(e){}}); R.stream=null; }
 }
 async function listCameras(){
@@ -2435,6 +2503,23 @@ async function loadPhoto(file){
   if(bmp.close) try{bmp.close();}catch(e){}
 }
 async function usePhotoSource(canvas, f35){
+  if(needsScan() && !R.pendingPhoto){
+    R.pendingPhoto={canvas, f35};
+    showError("Scan your face first",
+      "Depth taken from a single photo is an estimate that leans on an average face. A 30-second head-turn scan measures your actual facial depth and makes everything downstream — the distances, the equivalent focal length, the warp itself — far more accurate."
+      + (R.cameraFailed ? " No camera was available on this device, so you can continue with the estimate." : ""),
+      {retry:true, upload:false, close:true,
+       onRetry:()=>{ hideError(); const p=R.pendingPhoto; R.pendingPhoto=null; R.queuedPhoto=p; startCamera(S.deviceId); }});
+    el.errRetry.textContent="Scan my face first";
+    el.errClose.textContent="Use this photo with estimated depth";
+    el.errClose.onclick=()=>{
+      hideError(); S.gateBypassed=true;
+      const p=R.pendingPhoto; R.pendingPhoto=null;
+      if(p) usePhotoSource(p.canvas, p.f35);
+    };
+    return;
+  }
+  R.pendingPhoto=null;
   if(!R.ren||!R.ren.ok){
     showError("WebGL unavailable",
       "The perspective renderer could not start, so images cannot be displayed. Reload the page, or try a browser with hardware acceleration enabled.",
@@ -2451,6 +2536,7 @@ async function usePhotoSource(canvas, f35){
   updateUI();
   const ok=await ensureModel();
   if(ok) await detectPhoto(f35);
+  updateLock();
 }
 async function detectPhoto(f35){
   if(!R.image) return;
@@ -2564,7 +2650,31 @@ function stepCamera(now){
 
 /* ============================================================================
    3D SCAN CONTROLLER
+   ----------------------------------------------------------------------------
+   The simulator stays locked until the user has built a personal 3D model of
+   their face. Depth from a single frame is an estimate regularised toward an
+   average face; the multi-view scan measures the individual, and every number
+   the app then shows is derived from that. Requiring it up front is the
+   difference between a plausible demo and an accurate one.
    ========================================================================== */
+/** Does the simulator still need a scan before it can be used? */
+function needsScan(){
+  return S.gateScan && !S.gateBypassed && !(R.scan && R.scan.model);
+}
+/** Show/hide the simulator chrome according to the gate. */
+function updateLock(){
+  const locked = needsScan();
+  document.body.classList.toggle("gated", locked);
+  el.panel.classList.toggle("hide", locked || S.source==="none");
+  if(R.lockedState!==locked){
+    R.lockedState=locked;
+    const sub=document.querySelector(".brand .privacy");
+    if(sub) sub.textContent = locked
+      ? "Step 1 — build your 3D face model"
+      : "Camera processing stays on your device";
+  }
+  return locked;
+}
 function buildScanDots(){
   el.scanDots.innerHTML="";
   for(let i=0;i<SCAN_BINS;i++){
@@ -2573,22 +2683,44 @@ function buildScanDots(){
     el.scanDots.appendChild(d);
   }
 }
-function startScan(){
+function startScan(required){
   if(S.source!=="camera"){ setStatus("3D scan needs the live camera","err",2600); return; }
   if(!R.modelReady){ setStatus("Face model still loading…","load",2000); return; }
+  R.scanRequired=!!required;
   R.scan.reset();
   S.scanning=true; R.lastScanAt=0;
   el.scanui.classList.remove("hide");
   el.scanDone.classList.add("hide");
-  el.scanCancel.textContent="Cancel";
-  el.scanSub.textContent="Turning your head lets the app measure your real facial depth from several angles instead of estimating it from one frame.";
+  el.scanCancel.textContent = R.scanRequired ? "Back" : "Cancel";
+  el.scanSub.textContent = R.scanRequired
+    ? "Before you can simulate anything, the app needs your real facial depth. Turning your head measures it from several angles — a single frame can only estimate it."
+    : "Turning your head lets the app measure your real facial depth from several angles instead of estimating it from one frame.";
+  updateLock();
   el.btnScan.classList.add("on");
   updateScanUI();
 }
 function cancelScan(){
-  S.scanning=false;
+  const wasRequired = R.scanRequired && needsScan();
+  S.scanning=false; R.scanRequired=false;
   el.scanui.classList.add("hide");
   el.btnScan.classList.toggle("on", !!(R.scan&&R.scan.model&&S.useScan));
+  if(wasRequired) backToStart();     // never drop the user into a locked simulator
+  else updateLock();
+}
+/** return to the opening screen and release the camera */
+function backToStart(){
+  S.scanning=false; R.scanRequired=false;
+  stopStream();
+  R.video=null; R.image=null; R.srcW=0; R.srcH=0;
+  S.source="none"; R.faces=[]; R.detected=false; R.fm.reset();
+  clearFacePicks();
+  el.scanui.classList.add("hide");
+  el.topbar.classList.add("hide");
+  el.panel.classList.add("hide");
+  el.intro.classList.remove("hide");
+  requestAnimationFrame(()=>el.intro.classList.remove("gone"));
+  setStatus("",null);
+  updateLock();
 }
 function scanTick(geom){
   const now=performance.now();
@@ -2629,12 +2761,24 @@ function finishScan(){
       el.scanSub.textContent="Depth accuracy "+Math.round(R.scan.quality*100)+"% · "+
         Math.round(R.scan.span)+"° of head rotation captured · saved on this device.";
       el.scanDone.classList.remove("hide");
+      el.scanDone.onclick=null;
+      el.scanDone.textContent = R.scanRequired ? "Start simulating" : "Use scan";
       el.scanCancel.textContent="Close";
-      setStatus("3D face scan complete","ok",2600);
+      el.scanCancel.classList.toggle("hide", !!R.scanRequired);
+      R.scanRequired=false;
+      updateLock();
+      setStatus("3D face scan complete — simulator unlocked","ok",3000);
+      if(R.queuedPhoto){
+        const q=R.queuedPhoto; R.queuedPhoto=null;
+        setTimeout(()=>{ cancelScan(); usePhotoSource(q.canvas, q.f35); }, 900);
+      }
     }else{
       el.scanInstr.textContent="Not enough coverage";
-      el.scanSub.textContent="Try again and turn your head further to each side.";
-      el.scanDone.classList.add("hide");
+      el.scanSub.textContent="Turn your head further to each side — the app needs to see you from several angles.";
+      el.scanDone.textContent="Try again";
+      el.scanDone.classList.remove("hide");
+      el.scanDone.onclick=()=>{ el.scanDone.onclick=null; startScan(R.scanRequired); };
+      el.scanBar.style.width="0%";
     }
     syncAdvanced();
   },30);
@@ -2651,6 +2795,7 @@ function enterApp(kind){
   el.topbar.classList.remove("hide");
   el.panel.classList.remove("hide");
   el.btnSource.title = kind==="camera" ? "Use a photo instead" : "Use the camera instead";
+  updateLock();
 }
 function exportFrame(){
   try{
@@ -2892,6 +3037,7 @@ function initializeApp(){
   buildAdvanced();
   el.btnScan.classList.toggle("on", !!R.scan.model && S.useScan);
   wire();                       // wire first, so error-card buttons always work
+  updateLock();
   R.ren=new Renderer(el.view);
   if(!R.ren.init()){
     showError("WebGL unavailable",
@@ -2986,6 +3132,7 @@ const FPS = {
   S,R,el,UI,
   calcMagnification, sliderToFt, ftToSlider, delaunay, FaceModel, distanceLabel,
   loadPhoto, similarityFit, jacobiTop4, FaceScan, startScan, cancelScan, set3d, M3,
+  needsScan, updateLock, finishScan, usePhotoSource, backToStart,
   exportModelOBJ, downloadModel, buildModelArrays,
   async demo(nose){
     const {pts,aspect}=synthLandmarks(nose);
