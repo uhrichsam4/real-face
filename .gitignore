@@ -1,0 +1,51 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PRIVATE — NEVER PUBLISH
+# _shots/ holds a real person's photograph and a 3D reconstruction of their
+# face. Keep this rule first and do not remove it.
+# ─────────────────────────────────────────────────────────────────────────────
+_shots/
+_testimgs/
+
+# The app's Save Frame / Export .obj buttons write files with exactly these
+# names into the browser's download folder. If that folder is ever this repo,
+# a real face capture would land next to the source. Keep them out.
+face.jpg
+face.obj
+face.mtl
+face-perspective-*.png
+face-perspective-*.jpg
+*.obj
+*.mtl
+
+# macOS / Windows / editor cruft
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+Desktop.ini
+*~
+*.swp
+.vscode/
+.idea/
+.claude/
+
+# Logs, temp, tooling (no build step today — guard anyway)
+*.log
+tmp/
+temp/
+*.tmp
+*.bak
+node_modules/
+dist/
+build/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key

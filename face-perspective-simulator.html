@@ -1,0 +1,3031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<meta name="description" content="Simulate how camera-to-subject distance changes facial perspective. Runs entirely on your device.">
+<title>Face Perspective Simulator</title>
+<style>
+/* ============================================================
+   Face Perspective Simulator — styles
+   Dark, glass, Apple-camera-utility feel.
+   ============================================================ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#000;
+  --glass:rgba(24,24,26,.62);
+  --glass-2:rgba(44,44,48,.72);
+  --glass-3:rgba(255,255,255,.08);
+  --stroke:rgba(255,255,255,.11);
+  --stroke-2:rgba(255,255,255,.18);
+  --txt:#fff;
+  --dim:rgba(235,235,245,.62);
+  --dim2:rgba(235,235,245,.34);
+  --accent:#0a84ff;
+  --good:#30d158;
+  --warn:#ff9f0a;
+  --bad:#ff453a;
+  --r-lg:22px; --r-md:14px; --r-sm:10px;
+  --sb:env(safe-area-inset-bottom,0px);
+  --st:env(safe-area-inset-top,0px);
+  --sl:env(safe-area-inset-left,0px);
+  --sr:env(safe-area-inset-right,0px);
+  --ease:cubic-bezier(.22,.61,.36,1);
+}
+html,body{height:100%;width:100%;background:var(--bg);color:var(--txt);overflow:hidden;overscroll-behavior:none}
+body{
+  font:400 15px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Inter,Roboto,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+button,input,select{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer}
+.hide{display:none!important}
+.mono{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+
+#app{position:fixed;inset:0;display:block;background:#000}
+#view{position:absolute;inset:0;width:100%;height:100%;display:block;background:#000;touch-action:none}
+#stage{position:absolute;inset:0;pointer-events:none}
+#stage>*{pointer-events:auto}
+
+/* ---------- top bar ---------- */
+#topbar{
+  position:absolute;top:0;left:0;right:0;z-index:20;
+  padding:calc(10px + var(--st)) calc(14px + var(--sr)) 10px calc(14px + var(--sl));
+  display:flex;align-items:center;gap:12px;
+  background:linear-gradient(to bottom,rgba(0,0,0,.62),rgba(0,0,0,0));
+  transition:opacity .35s var(--ease),transform .35s var(--ease);
+  pointer-events:none;
+}
+#topbar>*{pointer-events:auto}
+.brand{display:flex;flex-direction:column;gap:2px;min-width:0}
+.brand h1{font-size:15px;font-weight:600;letter-spacing:.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brand .privacy{font-size:11px;color:var(--dim2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tools{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
+.tbtn{
+  width:38px;height:38px;border-radius:12px;display:grid;place-items:center;
+  background:var(--glass);backdrop-filter:blur(24px) saturate(1.6);-webkit-backdrop-filter:blur(24px) saturate(1.6);
+  border:1px solid var(--stroke);transition:transform .16s var(--ease),background .2s,border-color .2s;
+  color:#fff;
+}
+.tbtn:hover{background:var(--glass-2)}
+.tbtn:active{transform:scale(.92)}
+.tbtn.on{background:rgba(10,132,255,.92);border-color:rgba(10,132,255,.6)}
+.tbtn svg{width:19px;height:19px;display:block;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.tbtn .lbl{display:none}
+
+/* ---------- status pill ---------- */
+#status{
+  position:absolute;z-index:19;left:50%;top:calc(56px + var(--st));transform:translateX(-50%);
+  padding:7px 14px;border-radius:999px;font-size:12.5px;letter-spacing:.2px;
+  background:var(--glass);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border:1px solid var(--stroke);color:var(--dim);
+  display:flex;align-items:center;gap:8px;white-space:nowrap;
+  opacity:0;transition:opacity .4s var(--ease),transform .4s var(--ease);pointer-events:none;
+}
+#status.show{opacity:1}
+#status .dot{width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 8px currentColor}
+#status.ok .dot{background:var(--good)}
+#status.err .dot{background:var(--bad)}
+#status .spin{width:12px;height:12px;border-radius:50%;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- bottom control panel ---------- */
+#panel{
+  position:absolute;left:0;right:0;bottom:0;z-index:20;
+  padding:0 calc(12px + var(--sr)) calc(12px + var(--sb)) calc(12px + var(--sl));
+  transition:opacity .35s var(--ease),transform .35s var(--ease);
+}
+.panel-inner{
+  max-width:820px;margin:0 auto;
+  background:var(--glass);backdrop-filter:blur(30px) saturate(1.7);-webkit-backdrop-filter:blur(30px) saturate(1.7);
+  border:1px solid var(--stroke);border-radius:var(--r-lg);
+  padding:14px 16px 12px;
+  box-shadow:0 12px 40px rgba(0,0,0,.5);
+  max-height:calc(100vh - 64px);
+  overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+}
+.row{display:flex;align-items:center;gap:10px}
+.row.center{justify-content:center}
+
+/* segmented control */
+.seg{display:inline-flex;background:rgba(120,120,128,.24);border-radius:11px;padding:2px;gap:2px}
+.seg button{
+  padding:6px 12px;border-radius:9px;font-size:12px;font-weight:600;letter-spacing:.3px;color:var(--dim);
+  transition:background .18s var(--ease),color .18s var(--ease);white-space:nowrap
+}
+.seg button.on{background:rgba(99,99,105,.85);color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35)}
+.holdbtn{
+  padding:6px 12px;border-radius:11px;font-size:12px;font-weight:600;letter-spacing:.3px;
+  background:rgba(120,120,128,.24);color:var(--dim);border:1px solid transparent;white-space:nowrap;
+  transition:background .15s var(--ease),color .15s;touch-action:none
+}
+.holdbtn.active{background:#fff;color:#000}
+
+/* readout */
+.readout{text-align:center;padding:8px 0 4px;line-height:1}
+#distMain{font-size:44px;font-weight:600;letter-spacing:-1.2px;font-variant-numeric:tabular-nums}
+#distMain small{font-size:20px;font-weight:500;letter-spacing:0;color:var(--dim);margin-left:4px}
+#distMetric{margin-top:7px;font-size:15px;color:var(--dim);font-variant-numeric:tabular-nums}
+#distLabel{margin-top:7px;font-size:10.5px;letter-spacing:1.6px;color:var(--dim2);font-weight:600;text-transform:uppercase;height:13px}
+
+/* slider */
+.sliderwrap{display:flex;align-items:center;gap:10px;margin-top:10px}
+.sliderwrap .end{font-size:10.5px;color:var(--dim2);white-space:nowrap;font-variant-numeric:tabular-nums}
+input[type=range]{
+  -webkit-appearance:none;appearance:none;flex:1;height:34px;background:transparent;touch-action:none;cursor:pointer;
+}
+input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:rgba(120,120,128,.38)}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:26px;height:26px;border-radius:50%;background:#fff;margin-top:-10px;
+  box-shadow:0 2px 8px rgba(0,0,0,.5),0 0 0 .5px rgba(0,0,0,.12);transition:transform .12s var(--ease)
+}
+input[type=range]:active::-webkit-slider-thumb{transform:scale(1.14)}
+input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:rgba(120,120,128,.38);border:0}
+input[type=range]::-moz-range-thumb{width:26px;height:26px;border:0;border-radius:50%;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+input[type=range].mini{height:26px}
+input[type=range].mini::-webkit-slider-thumb{width:18px;height:18px;margin-top:-6px}
+input[type=range].mini::-moz-range-thumb{width:18px;height:18px}
+input[type=range].mini::-webkit-slider-runnable-track{height:5px}
+
+/* presets */
+.presets{display:flex;gap:6px;margin-top:10px;justify-content:space-between}
+.presets button{
+  flex:1;padding:7px 2px;border-radius:9px;font-size:12px;font-weight:600;color:var(--dim);
+  background:rgba(120,120,128,.2);transition:background .16s var(--ease),color .16s,transform .12s
+}
+.presets button:active{transform:scale(.94)}
+.presets button.on{background:#fff;color:#000}
+
+/* meta line */
+.meta{display:flex;justify-content:center;gap:16px;margin-top:11px;font-size:11.5px;color:var(--dim2);flex-wrap:wrap}
+.meta b{color:var(--dim);font-weight:600;font-variant-numeric:tabular-nums}
+
+/* advanced */
+#advToggle{
+  display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:8px;padding:7px;
+  font-size:11px;letter-spacing:1.4px;font-weight:600;color:var(--dim2);text-transform:uppercase
+}
+#advToggle svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2;transition:transform .28s var(--ease)}
+#advToggle.open svg{transform:rotate(180deg)}
+#advanced{
+  max-height:0;overflow:hidden;transition:max-height .4s var(--ease);
+}
+#advanced.open{max-height:min(40vh,360px);overflow-y:auto;-webkit-overflow-scrolling:touch}
+.adv-inner{padding:6px 2px 4px;display:flex;flex-direction:column;gap:11px;border-top:1px solid var(--stroke);margin-top:2px;padding-top:12px}
+.ctl{display:flex;align-items:center;gap:12px;min-height:28px}
+.ctl>label{font-size:12.5px;color:var(--dim);flex:0 0 132px}
+.ctl .val{font-size:12px;color:var(--dim2);flex:0 0 62px;text-align:right;font-variant-numeric:tabular-nums}
+.ctl input[type=range]{flex:1;min-width:60px}
+.ctl select,.ctl input[type=number]{
+  flex:1;background:rgba(120,120,128,.24);border:1px solid var(--stroke);border-radius:9px;padding:6px 9px;font-size:12.5px;
+  -webkit-appearance:none;appearance:none;outline:none;min-width:0
+}
+.ctl select{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>");background-repeat:no-repeat;background-position:right 8px center;background-size:14px;padding-right:26px}
+.sw{position:relative;width:46px;height:27px;border-radius:14px;background:rgba(120,120,128,.34);transition:background .22s var(--ease);flex:0 0 auto;margin-left:auto}
+.sw::after{content:"";position:absolute;top:2.5px;left:2.5px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.4);transition:transform .22s var(--ease)}
+.sw.on{background:var(--good)}
+.sw.on::after{transform:translateX(19px)}
+.chips{display:flex;gap:5px;flex:1;flex-wrap:wrap}
+.chips button{padding:5px 9px;border-radius:8px;font-size:11.5px;background:rgba(120,120,128,.22);color:var(--dim)}
+.chips button.on{background:#fff;color:#000}
+.adv-note{font-size:11px;color:var(--dim2);line-height:1.45}
+
+/* split divider */
+#splitline{
+  position:absolute;top:0;bottom:0;width:2px;background:rgba(255,255,255,.85);z-index:15;
+  box-shadow:0 0 14px rgba(0,0,0,.65);transform:translateX(-1px);touch-action:none;cursor:ew-resize;
+}
+#splitline::before{
+  content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.92);
+  box-shadow:0 2px 10px rgba(0,0,0,.5)
+}
+#splitline::after{
+  content:"◀ ▶";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  font-size:10px;color:#000;letter-spacing:-1px;font-weight:700
+}
+#splitline i{position:absolute;top:calc(64px + var(--st));font-size:10px;letter-spacing:1.3px;font-style:normal;color:rgba(255,255,255,.8);text-shadow:0 1px 4px #000;white-space:nowrap}
+#splitline i.l{right:12px}
+#splitline i.r{left:12px}
+
+/* face picker markers */
+.facepick{
+  position:absolute;z-index:16;border:2px solid rgba(255,255,255,.9);border-radius:14px;
+  box-shadow:0 0 0 9999px rgba(0,0,0,0);cursor:pointer;transition:border-color .2s,background .2s;
+  background:rgba(255,255,255,.06)
+}
+.facepick.on{border-color:var(--accent);background:rgba(10,132,255,.12)}
+.facepick span{position:absolute;top:-11px;left:-2px;font-size:10px;font-weight:700;letter-spacing:1px;color:#fff;text-shadow:0 1px 3px #000}
+
+#hint3d{
+  position:absolute;z-index:19;left:50%;bottom:calc(50% + 0px);transform:translateX(-50%);
+  padding:6px 13px;border-radius:999px;font-size:10.5px;letter-spacing:1.5px;font-weight:600;
+  background:rgba(0,0,0,.42);border:1px solid var(--stroke);color:var(--dim);pointer-events:none;white-space:nowrap;
+  bottom:auto;top:calc(58px + var(--st))
+}
+/* 3D scan overlay */
+#scanui{
+  position:absolute;z-index:35;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:min(400px,86vw);padding:20px 22px;border-radius:22px;text-align:center;
+  background:rgba(20,20,22,.72);backdrop-filter:blur(30px) saturate(1.6);-webkit-backdrop-filter:blur(30px) saturate(1.6);
+  border:1px solid var(--stroke-2);box-shadow:0 20px 60px rgba(0,0,0,.6)
+}
+#scanui h3{font-size:11px;letter-spacing:2px;color:var(--dim2);font-weight:700;text-transform:uppercase}
+#scanui .instr{margin-top:12px;font-size:19px;font-weight:600;letter-spacing:-.2px;line-height:1.3;min-height:50px;display:flex;align-items:center;justify-content:center}
+#scanui .dots{display:flex;gap:5px;justify-content:center;margin-top:14px}
+#scanui .dots i{width:11px;height:11px;border-radius:50%;background:rgba(255,255,255,.16);transition:background .25s var(--ease),transform .25s var(--ease)}
+#scanui .dots i.on{background:var(--good);transform:scale(1.16)}
+#scanui .dots i.mid{box-shadow:0 0 0 2px rgba(255,255,255,.22)}
+#scanui .bar{height:4px;border-radius:2px;background:rgba(255,255,255,.14);margin-top:16px;overflow:hidden}
+#scanui .bar b{display:block;height:100%;width:0;background:#fff;border-radius:2px;transition:width .3s var(--ease)}
+#scanui .sub{margin-top:12px;font-size:12px;color:var(--dim2);line-height:1.45}
+#scanui .acts{margin-top:16px;display:flex;gap:9px}
+#scanui .acts button{flex:1;padding:10px;border-radius:12px;font-size:13.5px;font-weight:600;background:rgba(120,120,128,.3)}
+#scanui .acts button.p{background:#fff;color:#000}
+
+/* intro */
+#intro{
+  position:absolute;inset:0;z-index:40;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:0;padding:calc(24px + var(--st)) 24px calc(24px + var(--sb));
+  background:radial-gradient(120% 90% at 50% 22%,#1b1c1f 0%,#0a0a0b 55%,#000 100%);
+  transition:opacity .5s var(--ease),transform .5s var(--ease)
+}
+#intro.gone{opacity:0;transform:scale(1.04);pointer-events:none}
+.intro-mark{width:86px;height:86px;margin-bottom:22px;opacity:.95}
+.intro-mark svg{width:100%;height:100%;fill:none;stroke:#fff;stroke-width:1.1;stroke-linecap:round;stroke-linejoin:round}
+#intro h2{font-size:29px;font-weight:600;letter-spacing:-.6px;text-align:center}
+#intro p.sub{margin-top:10px;font-size:15px;color:var(--dim);text-align:center;max-width:340px;line-height:1.45}
+.intro-actions{margin-top:30px;display:flex;flex-direction:column;gap:11px;width:min(320px,86vw)}
+.bigbtn{
+  padding:15px 20px;border-radius:15px;font-size:16px;font-weight:600;letter-spacing:.2px;
+  display:flex;align-items:center;justify-content:center;gap:9px;transition:transform .14s var(--ease),background .2s
+}
+.bigbtn:active{transform:scale(.97)}
+.bigbtn.primary{background:#fff;color:#000}
+.bigbtn.ghost{background:rgba(120,120,128,.26);color:#fff;border:1px solid var(--stroke)}
+.bigbtn svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#intro .note{margin-top:26px;font-size:11.5px;color:var(--dim2);text-align:center;max-width:360px;line-height:1.5}
+
+/* error card */
+#errcard{
+  position:absolute;z-index:45;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:min(360px,88vw);padding:22px;border-radius:20px;text-align:center;
+  background:var(--glass-2);backdrop-filter:blur(34px);-webkit-backdrop-filter:blur(34px);
+  border:1px solid var(--stroke-2);box-shadow:0 20px 60px rgba(0,0,0,.6)
+}
+#errcard h3{font-size:17px;font-weight:600;margin-bottom:8px}
+#errcard p{font-size:13.5px;color:var(--dim);line-height:1.5}
+#errcard .acts{margin-top:18px;display:flex;flex-direction:column;gap:9px}
+#errcard .acts button{padding:11px;border-radius:12px;font-size:14px;font-weight:600}
+#errcard .acts .p{background:#fff;color:#000}
+#errcard .acts .g{background:rgba(120,120,128,.3);color:#fff}
+
+/* dropzone */
+#dropzone{
+  position:absolute;inset:16px;z-index:50;border:2px dashed rgba(255,255,255,.55);border-radius:24px;
+  display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:600;
+  background:rgba(0,0,0,.62);backdrop-filter:blur(8px);pointer-events:none
+}
+
+/* debug panel */
+#debug{
+  position:absolute;z-index:30;left:calc(12px + var(--sl));top:calc(58px + var(--st));width:236px;
+  background:rgba(10,10,12,.82);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border:1px solid var(--stroke);border-radius:14px;padding:11px 12px;
+  font:500 11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--dim);
+  max-height:calc(100% - 200px);overflow:auto
+}
+#debug h4{font-size:9.5px;letter-spacing:1.5px;color:var(--dim2);margin-bottom:7px;text-transform:uppercase}
+#debug .k{display:flex;justify-content:space-between;gap:8px}
+#debug .k b{color:#fff;font-weight:600;font-variant-numeric:tabular-nums}
+#debug hr{border:0;border-top:1px solid var(--stroke);margin:9px 0}
+#debug .dctl{display:flex;align-items:center;gap:6px;margin-top:5px}
+#debug .dctl span{flex:0 0 78px;font-size:10px}
+#debug .dctl input{flex:1}
+#debug .dctl b{flex:0 0 34px;text-align:right;color:#fff;font-size:10px}
+
+/* immersive / fullscreen chrome hiding */
+body.immersive #topbar{opacity:0;transform:translateY(-14px);pointer-events:none}
+body.immersive #panel .panel-inner{background:rgba(20,20,22,.34);border-color:rgba(255,255,255,.06)}
+body.immersive #panel .meta,body.immersive #advToggle,body.immersive .compare-row{opacity:0;height:0;margin:0;padding:0;overflow:hidden;pointer-events:none}
+
+@media (max-width:560px){
+  .brand .privacy{display:none}
+  #distMain{font-size:36px}
+  #distMetric{margin-top:5px;font-size:14px}
+  .readout{padding:4px 0 2px}
+  .panel-inner{padding:11px 12px 9px;border-radius:20px}
+  .tbtn{width:36px;height:36px;border-radius:11px}
+  .tools{gap:6px}
+  .ctl>label{flex:0 0 104px;font-size:12px}
+  .ctl .val{flex:0 0 52px}
+  .presets{gap:4px;margin-top:8px}
+  .presets button{font-size:11.5px;padding:8px 0}
+  .meta{gap:10px;font-size:10.5px;margin-top:9px}
+  .sliderwrap{margin-top:8px}
+  #advToggle{padding:6px;margin-top:6px}
+  #intro h2{font-size:25px}
+  #advanced.open{max-height:min(38vh,320px)}
+}
+@media (max-width:520px){
+  .brand h1{display:none}
+  .holdbtn .lg{display:none}
+  .seg button{padding:6px 9px;font-size:11.5px}
+  .compare-row{gap:8px}
+}
+@media (max-width:390px){
+  .tbtn{width:33px;height:33px}
+  .tbtn svg{width:17px;height:17px}
+  .tools{gap:5px}
+}
+/* short viewports (landscape phones, small windows): keep the image dominant */
+@media (max-height:700px){
+  .readout{padding:2px 0 0}
+  #distMain{font-size:30px}
+  #distMetric{margin-top:3px;font-size:12.5px}
+  #distLabel{margin-top:3px;font-size:9.5px;letter-spacing:1.3px;height:11px}
+  .panel-inner{padding:9px 14px 7px;border-radius:18px}
+  .sliderwrap{margin-top:4px}
+  input[type=range]{height:28px}
+  input[type=range]::-webkit-slider-thumb{width:22px;height:22px;margin-top:-8px}
+  .presets{margin-top:6px}
+  .presets button{padding:6px 0;font-size:11.5px}
+  .meta{margin-top:7px;font-size:10.5px;gap:12px}
+  #advToggle{margin-top:4px;padding:5px;font-size:10px}
+  .seg button{padding:5px 10px;font-size:11.5px}
+  .holdbtn{padding:5px 10px;font-size:11.5px}
+  #advanced.open{max-height:min(34vh,240px)}
+  .compare-row{margin-bottom:0!important}
+}
+@media (max-height:520px){
+  #distMain{font-size:25px}
+  .meta{display:none}
+  .readout{padding:0}
+  #distLabel{display:none}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="view"></canvas>
+
+  <!-- overlays that live in image space -->
+  <div id="stage">
+    <div id="splitline" class="hide"><i class="l">ORIGINAL</i><i class="r">SIMULATED</i></div>
+    <div id="facepicks"></div>
+  </div>
+
+  <!-- top bar -->
+  <header id="topbar" class="hide">
+    <div class="brand">
+      <h1>Face Perspective Simulator</h1>
+      <span class="privacy">Camera processing stays on your device</span>
+    </div>
+    <div class="tools">
+      <button class="tbtn" id="btnSource" title="Switch source (camera / photo)" aria-label="Switch source">
+        <svg viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.7l1-1.8h5.6l1 1.8h1.7A2.5 2.5 0 0 1 19 8.5v8A2.5 2.5 0 0 1 16.5 19h-11A2.5 2.5 0 0 1 3 16.5z"/><circle cx="11" cy="12" r="3.2"/></svg>
+      </button>
+      <button class="tbtn" id="btnMirror" title="Mirror view" aria-label="Mirror view">
+        <svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M9 7L4 12l5 5z"/><path d="M15 7l5 5-5 5z"/></svg>
+      </button>
+      <button class="tbtn" id="btnAlign" title="Align face" aria-label="Align face">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="1.6"/></svg>
+      </button>
+      <button class="tbtn" id="btnScan" title="3D face scan" aria-label="3D face scan">
+        <svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M20 8V6a2 2 0 0 0-2-2h-2M4 16v2a2 2 0 0 0 2 2h2M20 16v2a2 2 0 0 1-2 2h-2"/><ellipse cx="12" cy="11" rx="3.6" ry="4.6"/><path d="M3.5 12h17" opacity=".6"/></svg>
+      </button>
+      <button class="tbtn" id="btn3d" title="3D view of the face model" aria-label="3D view">
+        <svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>
+      </button>
+      <button class="tbtn" id="btnMesh" title="Show face mesh" aria-label="Show face mesh">
+        <svg viewBox="0 0 24 24"><path d="M12 3l8 5v8l-8 5-8-5V8z"/><path d="M4 8l8 5 8-5M12 13v8"/></svg>
+      </button>
+      <button class="tbtn" id="btnSave" title="Save frame" aria-label="Save frame">
+        <svg viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M8 10.5l4 4 4-4"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/></svg>
+      </button>
+      <button class="tbtn" id="btnReset" title="Reset" aria-label="Reset">
+        <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.6-5.9"/><path d="M4 4v4h4"/></svg>
+      </button>
+      <button class="tbtn" id="btnFull" title="Fullscreen" aria-label="Fullscreen">
+        <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div id="status"><span class="dot"></span><span class="txt">Loading…</span></div>
+  <div id="hint3d" class="hide">3D FACE MODEL · DRAG TO ROTATE</div>
+
+  <!-- bottom control panel -->
+  <section id="panel" class="hide">
+    <div class="panel-inner">
+      <div class="row center compare-row" style="margin-bottom:2px">
+        <div class="seg" id="segCompare">
+          <button data-v="sim" class="on">SIMULATED</button>
+          <button data-v="orig">ORIGINAL</button>
+          <button data-v="split">SPLIT</button>
+        </div>
+        <button class="holdbtn" id="btnHold">HOLD<span class="lg"> FOR ORIGINAL</span></button>
+      </div>
+
+      <div class="readout">
+        <div id="distMain" class="mono">3.0<small>ft</small></div>
+        <div id="distMetric" class="mono">0.91 m</div>
+        <div id="distLabel">CLOSE PORTRAIT</div>
+      </div>
+
+      <div class="sliderwrap">
+        <span class="end" id="sliderMin">1 ft</span>
+        <input type="range" id="mainSlider" min="0" max="1" step="0.00001" value="0.4534" aria-label="Camera distance">
+        <span class="end" id="sliderMax">10,000 ft</span>
+      </div>
+
+      <div class="presets" id="presets"></div>
+
+      <div class="meta">
+        <span>Source <b id="mSrc">3.0 ft</b></span>
+        <span>Target <b id="mTgt">3.0 ft</b></span>
+        <span>Equivalent framing <b id="mFocal">— mm</b></span>
+      </div>
+
+      <button id="advToggle">ADVANCED <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+      <div id="advanced"><div class="adv-inner" id="advInner"></div></div>
+    </div>
+  </section>
+
+  <!-- 3D scan -->
+  <div id="scanui" class="hide">
+    <h3>3D Face Scan</h3>
+    <div class="instr" id="scanInstr">Look straight at the camera</div>
+    <div class="dots" id="scanDots"></div>
+    <div class="bar"><b id="scanBar"></b></div>
+    <p class="sub" id="scanSub">Turning your head lets the app measure your real facial depth from several angles instead of estimating it from one frame.</p>
+    <div class="acts">
+      <button id="scanCancel">Cancel</button>
+      <button class="p hide" id="scanDone">Use scan</button>
+    </div>
+  </div>
+
+  <!-- intro -->
+  <div id="intro">
+    <div class="intro-mark">
+      <svg viewBox="0 0 100 100">
+        <ellipse cx="50" cy="50" rx="26" ry="34"/>
+        <path d="M50 34v22l-6 5 6 3"/>
+        <path d="M36 44h9M55 44h9"/>
+        <path d="M40 70q10 7 20 0"/>
+        <path d="M24 50c-8 0-14 0-14 0M76 50c8 0 14 0 14 0" opacity=".45"/>
+        <path d="M10 38v24M90 38v24" opacity=".45"/>
+      </svg>
+    </div>
+    <h2>Face Perspective Simulator</h2>
+    <p class="sub">See how camera distance changes facial perspective.</p>
+    <div class="intro-actions">
+      <button class="bigbtn primary" id="introCam">
+        <svg viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.7l1-1.8h5.6l1 1.8h1.7A2.5 2.5 0 0 1 19 8.5v8A2.5 2.5 0 0 1 16.5 19h-11A2.5 2.5 0 0 1 3 16.5z"/><circle cx="11" cy="12" r="3.2"/></svg>
+        USE CAMERA
+      </button>
+      <button class="bigbtn ghost" id="introUpload">
+        <svg viewBox="0 0 24 24"><path d="M12 16V4"/><path d="M8 7.5l4-4 4 4"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/></svg>
+        UPLOAD PHOTO
+      </button>
+    </div>
+    <p class="note">Perspective simulation is approximate and depends on source camera distance and face-depth estimation. Your camera frames and photos never leave your device — the face-tracking model itself is downloaded once from a public CDN.</p>
+  </div>
+
+  <!-- error card -->
+  <div id="errcard" class="hide">
+    <h3 id="errTitle">Camera unavailable</h3>
+    <p id="errMsg"></p>
+    <div class="acts">
+      <button class="p" id="errRetry">Try Again</button>
+      <button class="g" id="errUpload">Upload Photo Instead</button>
+      <button class="g hide" id="errClose">Dismiss</button>
+    </div>
+  </div>
+
+  <div id="dropzone" class="hide">Drop a photo to simulate</div>
+
+  <!-- developer panel -->
+  <div id="debug" class="hide">
+    <h4>Developer</h4>
+    <div class="k"><span>FPS</span><b id="dFps">—</b></div>
+    <div class="k"><span>Frame time</span><b id="dFrame">—</b></div>
+    <div class="k"><span>Tracker FPS</span><b id="dTfps">—</b></div>
+    <div class="k"><span>Landmarks</span><b id="dLm">—</b></div>
+    <div class="k"><span>Confidence</span><b id="dConf">—</b></div>
+    <div class="k"><span>Mesh triangles</span><b id="dTri">—</b></div>
+    <div class="k"><span>WebGL</span><b id="dGl">—</b></div>
+    <hr>
+    <div class="k"><span>Source dist</span><b id="dSrc">—</b></div>
+    <div class="k"><span>Target dist</span><b id="dTgt">—</b></div>
+    <div class="k"><span>Distance ratio</span><b id="dRatio">—</b></div>
+    <div class="k"><span>Focal mult.</span><b id="dFocal">—</b></div>
+    <div class="k"><span>Face width</span><b id="dFw">—</b></div>
+    <div class="k"><span>Nose depth</span><b id="dNose">—</b></div>
+    <hr>
+    <div class="k"><span>Yaw</span><b id="dYaw">—</b></div>
+    <div class="k"><span>Pitch</span><b id="dPitch">—</b></div>
+    <div class="k"><span>Roll</span><b id="dRoll">—</b></div>
+    <hr>
+    <div class="dctl"><span>Depth scale</span><input type="range" class="mini" id="dvDepth" min="0" max="2.5" step="0.01"><b id="dvDepthV"></b></div>
+    <div class="dctl"><span>Warp falloff</span><input type="range" class="mini" id="dvFall" min="0.3" max="2.5" step="0.01"><b id="dvFallV"></b></div>
+    <div class="dctl"><span>Smoothing</span><input type="range" class="mini" id="dvSmooth" min="0" max="1" step="0.01"><b id="dvSmoothV"></b></div>
+    <div class="adv-note" style="margin-top:8px">D or ⌘/Ctrl+Shift+D toggles</div>
+  </div>
+
+  <input type="file" id="fileInput" accept="image/png,image/jpeg,image/jpg,image/webp,image/*" class="hide">
+  <video id="video" playsinline autoplay muted class="hide"></video>
+</div>
+<script>
+"use strict";
+/* ==============================================================================
+   FACE PERSPECTIVE SIMULATOR
+   ------------------------------------------------------------------------------
+   Simulates the change in facial perspective caused by moving a real camera
+   closer to / farther from the subject, while keeping the face framed the same.
+
+   THE MODEL (pinhole camera, see calcMagnification):
+     A facial point sits at metric depth `d` in front of the face's reference
+     plane (d > 0 = protruding toward the camera, e.g. the nose tip).
+     The source photo was taken from distance Ds with focal length Fs, so the
+     point landed at image position  ps = Fs * X / (Ds - d).
+     A target camera at distance Dt with focal length Ft would place it at
+                                    pt = Ft * X / (Dt - d).
+     Eliminating the unknown 3D X gives a pure image-space magnification:
+
+              pt      Ft   (Ds - d)
+             ---- =  ---- * --------            [about the optical axis]
+              ps      Fs   (Dt - d)
+
+     FACE SIZE LOCK keeps framing constant by choosing Ft/Fs = Dt/Ds
+     (focal length proportional to distance), which yields
+
+              m(d) = Dt(Ds - d) / (Ds(Dt - d))
+
+     m(0) = 1 (reference plane never moves), m > 1 for receding features when
+     Dt > Ds (ears/sides grow), m < 1 for protruding features (nose shrinks) —
+     exactly real perspective compression. As Dt -> infinity, m -> Ds/(Ds - d),
+     the orthographic limit. With FACE SIZE LOCK off we simply multiply the
+     whole frame by Ds/Dt, which recovers the true fixed-focal-length result.
+
+   RENDERING:
+     The face's depth field d(x,y) is rasterised into a small offscreen texture
+     from a Delaunay triangulation of the 478 landmarks, then blurred with a
+     mask-normalised blur so it extends smoothly into hair / temples / neck and
+     fades to zero over the background (no visible face-shaped seam).
+     The output pass warps per pixel by solving the INVERSE map with a few
+     fixed-point iterations, so there are no triangle seams at all.
+   ============================================================================== */
+
+/* ------------------------------- constants -------------------------------- */
+const FT = 0.3048;                 // metres per foot
+const FACE_WIDTH_M = 0.145;        // average adult bizygomatic (cheekbone) width
+const MIN_FT = 1, MAX_FT = 10000;
+const SLIDER_GAMMA = 2.2;          // distance = 10000^(t^gamma) ft -> ~60% of travel is 1..20 ft
+const FIELD = 512;                 // depth-field texture resolution
+const TRACK_HZ = 30;
+
+const MP_VERSIONS = [
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14",
+  "https://unpkg.com/@mediapipe/tasks-vision@0.10.14",
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9"
+];
+const MODEL_URLS = [
+  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+];
+
+/* landmark indices (MediaPipe FaceMesh / FaceLandmarker, 478 points) */
+const FACE_OVAL = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109];
+const IDX = {
+  noseTip:1, noseBridge:6, chin:152, forehead:10,
+  sideL:234, sideR:454, jawL:172, jawR:397,
+  eyeLouter:33, eyeLinner:133, eyeRouter:263, eyeRinner:362,
+  irisL:468, irisR:473, mouthL:61, mouthR:291, upperLip:13, lowerLip:14
+};
+const SENSORS = { ff:36, apsc:23.6, phone:7.6 };
+
+const PRESETS = [
+  {ft:1,   label:"1"},  {ft:2,  label:"2"},  {ft:3,  label:"3"},   {ft:5,  label:"5"},
+  {ft:10,  label:"10"}, {ft:20, label:"20"}, {ft:50, label:"50"},  {ft:MAX_FT, label:"∞"}
+];
+const SRC_PRESETS = [1,1.5,2,3,4,5,6,8,10];
+
+/* ------------------------------- utilities -------------------------------- */
+const $ = (s)=>document.querySelector(s);
+const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
+const lerp=(a,b,t)=>a+(b-a)*t;
+const smoothstep=(e0,e1,x)=>{const t=clamp((x-e0)/(e1-e0),0,1);return t*t*(3-2*t);};
+
+function sliderToFt(t){ return Math.pow(MAX_FT, Math.pow(clamp(t,0,1), SLIDER_GAMMA)); }
+function ftToSlider(ft){
+  const l = Math.log(clamp(ft,MIN_FT,MAX_FT))/Math.log(MAX_FT);
+  return Math.pow(clamp(l,0,1), 1/SLIDER_GAMMA);
+}
+function fmtFt(ft){
+  if(ft<10) return ft.toFixed(1);
+  if(ft<100) return ft.toFixed(1);
+  return Math.round(ft).toLocaleString("en-US");
+}
+function fmtFtShort(ft){
+  if(ft<10) return (Math.round(ft*10)/10)+" ft";
+  return Math.round(ft).toLocaleString("en-US")+" ft";
+}
+function fmtMetric(m){
+  if(m<1) return m.toFixed(2)+" m";
+  if(m<1000) return (m<10? m.toFixed(2): m.toFixed(1))+" m";
+  return (m/1000).toFixed(m<10000?2:1)+" km";
+}
+function distanceLabel(ft){
+  if(ft<1.5) return "EXTREME CLOSE-UP";
+  if(ft<2.5) return "PHONE SELFIE DISTANCE";
+  if(ft<3.5) return "CLOSE PORTRAIT";
+  if(ft<4.5) return "SHORT PORTRAIT";
+  if(ft<7)   return "NATURAL PORTRAIT";
+  if(ft<14)  return "LONG PORTRAIT";
+  if(ft<25)  return "COMPRESSED PERSPECTIVE";
+  if(ft<80)  return "STRONGLY COMPRESSED";
+  if(ft<400) return "VERY FLAT PERSPECTIVE";
+  if(ft<MAX_FT*0.98) return "NEARLY ORTHOGRAPHIC";
+  return "ORTHOGRAPHIC LIMIT";
+}
+
+/**
+ * Core perspective magnification (see header comment).
+ * @param {number} d  metric depth of the point in front of the reference plane (m, + = toward camera)
+ * @param {number} Ds source camera distance (m)
+ * @param {number} Dt target camera distance (m)
+ * @returns {number} radial magnification about the projection centre
+ */
+function calcMagnification(d, Ds, Dt){
+  const a = Math.max(Ds - d, 0.02);
+  const b = Math.max(Dt - d, 0.02);
+  return (Dt * a) / (Ds * b);
+}
+
+/* ---------------------------- One Euro filter ------------------------------ */
+/* Adaptive exponential smoothing: heavy smoothing when still (kills jitter),
+   light smoothing when moving fast (kills lag). Applied to every landmark. */
+class OneEuroArray{
+  constructor(){ this.x=null; this.dx=null; this.ready=false; }
+  reset(){ this.ready=false; }
+  static alpha(cutoff, dt){ const tau=1/(2*Math.PI*cutoff); return 1/(1+tau/dt); }
+  filter(src, dt, minCutoff, beta){
+    const n=src.length;
+    if(!this.x || this.x.length!==n){ this.x=new Float32Array(n); this.dx=new Float32Array(n); this.ready=false; }
+    if(!this.ready){ this.x.set(src); this.dx.fill(0); this.ready=true; return this.x; }
+    dt = clamp(dt, 1/240, 0.2);
+    const ad = OneEuroArray.alpha(1.2, dt);
+    for(let i=0;i<n;i++){
+      const rawDx = (src[i]-this.x[i])/dt;
+      this.dx[i] += ad*(rawDx-this.dx[i]);
+      const cutoff = minCutoff + beta*Math.abs(this.dx[i]);
+      const a = OneEuroArray.alpha(cutoff, dt);
+      this.x[i] += a*(src[i]-this.x[i]);
+    }
+    return this.x;
+  }
+}
+
+/* ------------------------- Delaunay triangulation -------------------------- */
+/* Bowyer–Watson. Runs on the 2D landmark layout; the result (topology only) is
+   cached and reused until the head pose changes appreciably. */
+function delaunay(px, py, n){
+  let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
+  for(let i=0;i<n;i++){
+    if(px[i]<minx)minx=px[i]; if(px[i]>maxx)maxx=px[i];
+    if(py[i]<miny)miny=py[i]; if(py[i]>maxy)maxy=py[i];
+  }
+  const dx=maxx-minx||1, dy=maxy-miny||1, dmax=Math.max(dx,dy)*20;
+  const mx=(minx+maxx)/2, my=(miny+maxy)/2;
+  const X=new Float64Array(n+3), Y=new Float64Array(n+3);
+  for(let i=0;i<n;i++){X[i]=px[i];Y[i]=py[i];}
+  X[n]=mx-dmax; Y[n]=my-dmax;
+  X[n+1]=mx+dmax; Y[n+1]=my-dmax;
+  X[n+2]=mx;      Y[n+2]=my+dmax;
+
+  let tris=[];
+  const mkTri=(a,b,c)=>{
+    const ax=X[a],ay=Y[a],bx=X[b],by=Y[b],cx=X[c],cy=Y[c];
+    const d=2*(ax*(by-cy)+bx*(cy-ay)+cx*(ay-by));
+    if(Math.abs(d)<1e-14) return {a,b,c,x:0,y:0,r2:-1};
+    const a2=ax*ax+ay*ay, b2=bx*bx+by*by, c2=cx*cx+cy*cy;
+    const ux=(a2*(by-cy)+b2*(cy-ay)+c2*(ay-by))/d;
+    const uy=(a2*(cx-bx)+b2*(ax-cx)+c2*(bx-ax))/d;
+    return {a,b,c,x:ux,y:uy,r2:(ax-ux)*(ax-ux)+(ay-uy)*(ay-uy)};
+  };
+  tris.push(mkTri(n,n+1,n+2));
+
+  const edges=[];
+  for(let i=0;i<n;i++){
+    const x=X[i], y=Y[i];
+    edges.length=0;
+    const keep=[];
+    for(let t=0;t<tris.length;t++){
+      const T=tris[t];
+      const ddx=x-T.x, ddy=y-T.y;
+      if(T.r2>=0 && ddx*ddx+ddy*ddy < T.r2){
+        edges.push(T.a,T.b, T.b,T.c, T.c,T.a);
+      } else keep.push(T);
+    }
+    // drop edges shared by two removed triangles (interior of the cavity)
+    const m=edges.length/2;
+    for(let e=0;e<m;e++){
+      const a=edges[e*2], b=edges[e*2+1];
+      if(a<0) continue;
+      let dup=false;
+      for(let f=e+1;f<m;f++){
+        const c=edges[f*2], d2=edges[f*2+1];
+        if((a===c&&b===d2)||(a===d2&&b===c)){ edges[f*2]=-1; dup=true; }
+      }
+      if(!dup) keep.push(mkTri(a,b,i));
+    }
+    tris=keep;
+  }
+  const out=[];
+  for(const T of tris){
+    if(T.a>=n||T.b>=n||T.c>=n||T.r2<0) continue;
+    out.push(T.a,T.b,T.c);
+  }
+  return new Uint16Array(out);
+}
+
+/* ============================================================================
+   WEBGL RENDERER
+   Pass 1  field   : rasterise the face depth field + coverage mask (512x512)
+   Pass 2  blurH   : mask-normalised separable blur (extends field past the face)
+   Pass 3  blurV
+   Pass 4  warp    : full-screen inverse-warp of the source image
+   Pass 5  overlay : optional landmark / wireframe debug drawing
+   ========================================================================== */
+const VS_FIELD = `
+attribute vec2 aPos; attribute float aDepth; varying float vD;
+void main(){ vD = aDepth; gl_Position = vec4(aPos*2.0-1.0, 0.0, 1.0); }`;
+const FS_FIELD = `
+precision mediump float; varying float vD;
+void main(){ gl_FragColor = vec4(vD, 1.0, 0.0, 1.0); }`;
+
+const VS_QUAD = `
+attribute vec2 aClip; varying vec2 vUV;
+void main(){ vUV = aClip*0.5+0.5; gl_Position = vec4(aClip,0.0,1.0); }`;
+const FS_BLUR = `
+precision mediump float; varying vec2 vUV;
+uniform sampler2D uTex; uniform vec2 uStep;
+void main(){
+  vec4 s = texture2D(uTex,vUV)*0.13702;
+  s += (texture2D(uTex,vUV+uStep)      + texture2D(uTex,vUV-uStep))      *0.12962;
+  s += (texture2D(uTex,vUV+uStep*2.0)  + texture2D(uTex,vUV-uStep*2.0))  *0.10972;
+  s += (texture2D(uTex,vUV+uStep*3.0)  + texture2D(uTex,vUV-uStep*3.0))  *0.08311;
+  s += (texture2D(uTex,vUV+uStep*4.0)  + texture2D(uTex,vUV-uStep*4.0))  *0.05633;
+  s += (texture2D(uTex,vUV+uStep*5.0)  + texture2D(uTex,vUV-uStep*5.0))  *0.03417;
+  s += (texture2D(uTex,vUV+uStep*6.0)  + texture2D(uTex,vUV-uStep*6.0))  *0.01854;
+  gl_FragColor = s;
+}`;
+
+const VS_WARP = `
+attribute vec2 aClip; varying vec2 vImg; varying vec2 vClip;
+uniform mat2 uInv; uniform vec2 uViewC;
+void main(){ vClip = aClip; vImg = uInv*aClip + uViewC; gl_Position = vec4(aClip,0.0,1.0); }`;
+const FS_WARP = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+varying vec2 vImg; varying vec2 vClip;
+uniform sampler2D uSrc, uFieldA, uFieldB;
+uniform vec2 uCenter;
+uniform float uInvA, uDs, uDt, uStrength, uDepthScale, uDRange, uNorm, uGlobalScale, uSplit, uMode, uHold;
+
+vec2 toUV(vec2 p){ return vec2(p.x*uInvA, p.y) + 0.5; }
+
+/* depth field + blend weight at an image-space point */
+float fieldAt(vec2 p, out float w){
+  vec2 uv = toUV(p);
+  vec4 A = texture2D(uFieldA, uv);
+  vec4 B = texture2D(uFieldB, uv);
+  float mb  = B.g;                                   /* blurred coverage      */
+  float ext = clamp(B.r/max(mb,0.0045), 0.0, 1.0);   /* mask-normalised depth */
+  float dExt = (ext - 0.5)*2.0*uDRange;
+  float dIn  = (A.r - 0.5)*2.0*uDRange;              /* crisp interior depth  */
+  float d = mix(dExt, dIn, smoothstep(0.30,0.92,A.g));
+  float inside = step(0.0,uv.x)*step(uv.x,1.0)*step(0.0,uv.y)*step(uv.y,1.0);
+  w = smoothstep(0.0,0.5,mb)*inside;
+  return d;
+}
+/* forward radial magnification factor at an image-space point */
+float gAt(vec2 p, float strength){
+  float w; float d = fieldAt(p,w)*uDepthScale;
+  float dmaxP = min(uDRange*3.0, 0.45*min(uDs,uDt));
+  d = clamp(d, -0.30, dmaxP);
+  float m = (uDt*max(uDs-d,0.02))/(uDs*max(uDt-d,0.02));
+  m = clamp(m*uNorm, 0.45, 2.2);
+  return 1.0 + w*strength*(m-1.0);
+}
+void main(){
+  float strength = uStrength*(1.0-uHold);
+  float scale = uGlobalScale;
+  if(uMode > 1.5){                       /* split */
+    if(vClip.x < uSplit){ strength = 0.0; scale = 1.0; }
+  } else if(uMode > 0.5){                /* original */
+    strength = 0.0; scale = 1.0;
+  }
+  if(uHold > 0.5){ scale = 1.0; }
+  vec2 q = uCenter + (vImg-uCenter)/max(scale,0.0015);
+  vec2 p = q;
+  /* solve the inverse of F(p) = C + (p-C)*g(p) by damped fixed-point iteration.
+     The damping keeps it stable where g varies fastest (the blend annulus). */
+  for(int i=0;i<5;i++){
+    float g = gAt(p, strength);
+    p = mix(p, uCenter + (q-uCenter)/max(g,0.15), 0.78);
+  }
+  vec2 uv = toUV(p);
+  float inside = step(0.0,uv.x)*step(uv.x,1.0)*step(0.0,uv.y)*step(uv.y,1.0);
+  vec3 col = texture2D(uSrc, clamp(uv, vec2(0.0006), vec2(0.9994))).rgb;
+  gl_FragColor = vec4(col*inside, 1.0);
+}`;
+
+const VS_MODEL = `
+attribute vec3 aPos3; attribute vec2 aUV; attribute vec3 aNrm;
+uniform mat3 uRot; uniform vec2 uScale; uniform float uPersp; uniform float uOffY;
+varying vec2 vUV; varying vec3 vN; varying float vZ;
+void main(){
+  vec3 p = uRot*aPos3;
+  vec3 n = uRot*aNrm;
+  vUV = aUV; vN = n; vZ = p.z;
+  float w = 1.0 - p.z*uPersp;                 /* +z is toward the viewer: nearer = larger */
+  gl_Position = vec4(p.x*uScale.x/w, -p.y*uScale.y/w + uOffY, -p.z*0.5, 1.0);
+}`;
+const FS_MODEL = `
+precision mediump float;
+varying vec2 vUV; varying vec3 vN; varying float vZ;
+uniform sampler2D uTex; uniform float uMode;
+void main(){
+  vec3 n = normalize(vN);
+  if(n.z<0.0) n = -n;                          /* two-sided: open surface */
+  vec3 L = normalize(vec3(-0.35,0.45,0.82));
+  float lam = clamp(dot(n,L),0.0,1.0);
+  float rim = pow(1.0-clamp(n.z,0.0,1.0), 2.5);
+  vec3 clay = vec3(0.80,0.79,0.78)*(0.16+0.84*lam) + vec3(0.20,0.42,0.75)*rim*0.5;
+  vec3 tex  = texture2D(uTex, vUV).rgb*(0.45+0.75*lam);
+  gl_FragColor = vec4(mix(tex, clay, uMode), 1.0);
+}`;
+const VS_LINE = `
+attribute vec2 aClip; attribute float aVal; varying float vVal;
+void main(){ vVal = aVal; gl_Position = vec4(aClip,0.0,1.0); gl_PointSize = 2.6; }`;
+const FS_LINE = `
+precision mediump float; varying float vVal; uniform float uAlpha; uniform float uColorize;
+void main(){
+  vec3 c = mix(vec3(0.35,0.85,1.0), vec3(1.0,0.42,0.28), clamp(vVal,0.0,1.0));
+  c = mix(vec3(0.55,0.95,1.0), c, uColorize);
+  gl_FragColor = vec4(c, uAlpha);
+}`;
+
+class Renderer{
+  constructor(canvas){
+    this.canvas = canvas;
+    this.gl = null;
+    this.ok = false;
+    this.isGL2 = false;
+  }
+  init(){
+    const opts = {alpha:false, antialias:true, depth:true, stencil:false,
+                  premultipliedAlpha:false, preserveDrawingBuffer:true,
+                  powerPreference:"high-performance", desynchronized:true};
+    let gl = this.canvas.getContext("webgl2", opts);
+    this.isGL2 = !!gl;
+    if(!gl) gl = this.canvas.getContext("webgl", opts) || this.canvas.getContext("experimental-webgl", opts);
+    if(!gl) return false;
+    this.gl = gl;
+    this.pField = this.program(VS_FIELD, FS_FIELD, ["aPos","aDepth"], []);
+    this.pBlur  = this.program(VS_QUAD , FS_BLUR , ["aClip"], ["uTex","uStep"]);
+    this.pWarp  = this.program(VS_WARP , FS_WARP , ["aClip"],
+      ["uSrc","uFieldA","uFieldB","uCenter","uInvA","uDs","uDt","uStrength","uDepthScale",
+       "uDRange","uNorm","uGlobalScale","uSplit","uMode","uHold","uInv","uViewC"]);
+    this.pLine  = this.program(VS_LINE , FS_LINE , ["aClip","aVal"], ["uAlpha","uColorize"]);
+    this.pModel = this.program(VS_MODEL, FS_MODEL, ["aPos3","aUV","aNrm"], ["uRot","uScale","uPersp","uTex","uMode","uOffY"]);
+    if(!this.pField||!this.pBlur||!this.pWarp||!this.pLine||!this.pModel) return false;
+
+    this.quad = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+
+    this.bPos   = gl.createBuffer();
+    this.bDepth = gl.createBuffer();
+    this.bIdx   = gl.createBuffer();
+    this.bLine  = gl.createBuffer();
+    this.bLineV = gl.createBuffer();
+    this.bP3=gl.createBuffer(); this.bUV=gl.createBuffer(); this.bNrm=gl.createBuffer(); this.bI3=gl.createBuffer();
+
+    this.texSrc = this.makeTex(null,1,1);
+    this.fboA = this.makeFBO(FIELD); this.fboB = this.makeFBO(FIELD); this.fboC = this.makeFBO(FIELD);
+    if(!this.fboA||!this.fboB||!this.fboC) return false;
+
+    gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE);
+    this.canvas.addEventListener("webglcontextlost",(e)=>{ e.preventDefault(); this.ok=false;
+      setStatus("Graphics context lost — restoring…","err"); },false);
+    this.canvas.addEventListener("webglcontextrestored",()=>{
+      if(this.init()){ if(R.image) this.uploadSource(R.image,R.srcW,R.srcH); setStatus("Restored","ok",1600); }
+      else showError("WebGL unavailable","The graphics context could not be restored. Reload the page to continue.",{retry:true,onRetry:()=>location.reload()});
+    },false);
+    this.ok = true;
+    this.srcW = 1; this.srcH = 1;
+    this.triCount = 0;
+    return true;
+  }
+  program(vsSrc, fsSrc, attrs, unis){
+    const gl=this.gl;
+    const mk=(type,src)=>{
+      const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
+      if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){ console.error("shader:",gl.getShaderInfoLog(s),src); return null; }
+      return s;
+    };
+    const vs=mk(gl.VERTEX_SHADER,vsSrc), fs=mk(gl.FRAGMENT_SHADER,fsSrc);
+    if(!vs||!fs) return null;
+    const p=gl.createProgram(); gl.attachShader(p,vs); gl.attachShader(p,fs);
+    attrs.forEach((a,i)=>gl.bindAttribLocation(p,i,a));   // 0 = position, 1 = aux
+    gl.linkProgram(p);
+    if(!gl.getProgramParameter(p,gl.LINK_STATUS)){ console.error("link:",gl.getProgramInfoLog(p)); return null; }
+    const o={prog:p,a:{},u:{}};
+    for(const a of attrs) o.a[a]=gl.getAttribLocation(p,a);
+    for(const u of unis) o.u[u]=gl.getUniformLocation(p,u);
+    o.u.uTex = o.u.uTex||gl.getUniformLocation(p,"uTex");
+    return o;
+  }
+  makeTex(data,w,h){
+    const gl=this.gl, t=gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D,t);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,data);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    return t;
+  }
+  makeFBO(size){
+    const gl=this.gl;
+    const tex=this.makeTex(null,size,size);
+    const fb=gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER,fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,tex,0);
+    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER)===gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    return ok?{fb,tex,size}:null;
+  }
+  uploadSource(el, w, h){
+    const gl=this.gl;
+    gl.bindTexture(gl.TEXTURE_2D,this.texSrc);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
+    try{
+      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,el);
+      this.srcW=w; this.srcH=h;
+      return true;
+    }catch(e){ return false; }
+  }
+  /* --- pass 1..3 : build the smooth depth field ------------------------- */
+  buildField(verts, depths, tris, sigmaX, sigmaY){
+    const gl=this.gl, P=this.pField;
+    gl.bindFramebuffer(gl.FRAMEBUFFER,this.fboA.fb);
+    gl.viewport(0,0,FIELD,FIELD);
+    gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(P.prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER,this.bPos);
+    gl.bufferData(gl.ARRAY_BUFFER,verts,gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(P.a.aPos); gl.vertexAttribPointer(P.a.aPos,2,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,this.bDepth);
+    gl.bufferData(gl.ARRAY_BUFFER,depths,gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(P.a.aDepth); gl.vertexAttribPointer(P.a.aDepth,1,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,this.bIdx);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,tris,gl.DYNAMIC_DRAW);
+    gl.drawElements(gl.TRIANGLES,tris.length,gl.UNSIGNED_SHORT,0);
+    this.triCount = tris.length/3;
+
+    /* separable, mask-normalised blur: A -> B (h) -> C (v) */
+    const B=this.pBlur;
+    const stepX = Math.max(0.5, sigmaX*FIELD/3)/FIELD;   // 13 taps, sigma = 3*step
+    const stepY = Math.max(0.5, sigmaY*FIELD/3)/FIELD;
+    gl.useProgram(B.prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER,this.quad);
+    gl.enableVertexAttribArray(B.a.aClip); gl.vertexAttribPointer(B.a.aClip,2,gl.FLOAT,false,0,0);
+    gl.disableVertexAttribArray(P.a.aDepth);
+    gl.activeTexture(gl.TEXTURE0); gl.uniform1i(B.u.uTex,0);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER,this.fboB.fb);
+    gl.bindTexture(gl.TEXTURE_2D,this.fboA.tex);
+    gl.uniform2f(B.u.uStep, stepX, 0);
+    gl.drawArrays(gl.TRIANGLES,0,3);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER,this.fboC.fb);
+    gl.bindTexture(gl.TEXTURE_2D,this.fboB.tex);
+    gl.uniform2f(B.u.uStep, 0, stepY);
+    gl.drawArrays(gl.TRIANGLES,0,3);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  }
+  clearField(){
+    const gl=this.gl;
+    for(const f of [this.fboA,this.fboB,this.fboC]){
+      gl.bindFramebuffer(gl.FRAMEBUFFER,f.fb);
+      gl.viewport(0,0,FIELD,FIELD);
+      gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    this.triCount=0;
+  }
+  /* --- pass 4 : output ---------------------------------------------------- */
+  drawWarp(u){
+    const gl=this.gl, W=this.pWarp;
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    gl.viewport(0,0,gl.drawingBufferWidth,gl.drawingBufferHeight);
+    gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(W.prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER,this.quad);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+    gl.disableVertexAttribArray(1);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,this.texSrc);     gl.uniform1i(W.u.uSrc,0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D,this.fboA.tex);   gl.uniform1i(W.u.uFieldA,1);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D,this.fboC.tex);   gl.uniform1i(W.u.uFieldB,2);
+    gl.uniformMatrix2fv(W.u.uInv,false,u.inv);
+    gl.uniform2f(W.u.uViewC,u.viewC[0],u.viewC[1]);
+    gl.uniform2f(W.u.uCenter,u.center[0],u.center[1]);
+    gl.uniform1f(W.u.uInvA,1/u.aspect);
+    gl.uniform1f(W.u.uDs,u.Ds); gl.uniform1f(W.u.uDt,u.Dt);
+    gl.uniform1f(W.u.uStrength,u.strength);
+    gl.uniform1f(W.u.uDepthScale,u.depthScale);
+    gl.uniform1f(W.u.uDRange,u.dRange);
+    gl.uniform1f(W.u.uNorm,u.norm);
+    gl.uniform1f(W.u.uGlobalScale,u.globalScale);
+    gl.uniform1f(W.u.uSplit,u.split);
+    gl.uniform1f(W.u.uMode,u.mode);
+    gl.uniform1f(W.u.uHold,u.hold);
+    gl.drawArrays(gl.TRIANGLES,0,3);
+    gl.activeTexture(gl.TEXTURE0);
+  }
+  /* --- 3D model view ------------------------------------------------------ */
+  drawModel(pos3, uv, nrm, idx, u){
+    const gl=this.gl, P=this.pModel;
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    gl.viewport(0,0,gl.drawingBufferWidth,gl.drawingBufferHeight);
+    gl.clearColor(0.045,0.047,0.055,1);
+    gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LEQUAL);
+    gl.useProgram(P.prog);
+    const bind=(buf,data,loc,size)=>{
+      gl.bindBuffer(gl.ARRAY_BUFFER,buf); gl.bufferData(gl.ARRAY_BUFFER,data,gl.DYNAMIC_DRAW);
+      gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc,size,gl.FLOAT,false,0,0);
+    };
+    bind(this.bP3,pos3,0,3); bind(this.bUV,uv,1,2); bind(this.bNrm,nrm,2,3);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,this.bI3);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,idx,gl.DYNAMIC_DRAW);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,this.texSrc); gl.uniform1i(P.u.uTex,0);
+    gl.uniformMatrix3fv(P.u.uRot,false,u.rot);
+    gl.uniform2f(P.u.uScale,u.scaleX,u.scaleY);
+    gl.uniform1f(P.u.uPersp,u.persp);
+    gl.uniform1f(P.u.uMode,u.mode);
+    gl.uniform1f(P.u.uOffY,u.offY||0);
+    gl.drawElements(gl.TRIANGLES,idx.length,gl.UNSIGNED_SHORT,0);
+    gl.disable(gl.DEPTH_TEST);
+    gl.disableVertexAttribArray(2);
+  }
+  /* --- pass 5 : debug wireframe ------------------------------------------ */
+  drawOverlay(lineClip, lineVal, lineCount, pointClip, pointVal, pointCount){
+    const gl=this.gl, L=this.pLine;
+    gl.useProgram(L.prog);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+    gl.bindBuffer(gl.ARRAY_BUFFER,this.bLine);
+    gl.bufferData(gl.ARRAY_BUFFER,lineClip,gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(L.a.aClip); gl.vertexAttribPointer(L.a.aClip,2,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,this.bLineV);
+    gl.bufferData(gl.ARRAY_BUFFER,lineVal,gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(L.a.aVal); gl.vertexAttribPointer(L.a.aVal,1,gl.FLOAT,false,0,0);
+    gl.uniform1f(L.u.uAlpha,0.22); gl.uniform1f(L.u.uColorize,0.0);
+    gl.drawArrays(gl.LINES,0,lineCount);
+    gl.bindBuffer(gl.ARRAY_BUFFER,this.bLine);
+    gl.bufferData(gl.ARRAY_BUFFER,pointClip,gl.DYNAMIC_DRAW);
+    gl.vertexAttribPointer(L.a.aClip,2,gl.FLOAT,false,0,0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,this.bLineV);
+    gl.bufferData(gl.ARRAY_BUFFER,pointVal,gl.DYNAMIC_DRAW);
+    gl.vertexAttribPointer(L.a.aVal,1,gl.FLOAT,false,0,0);
+    gl.uniform1f(L.u.uAlpha,0.95); gl.uniform1f(L.u.uColorize,1.0);
+    gl.drawArrays(gl.POINTS,0,pointCount);
+    gl.disable(gl.BLEND);
+  }
+}
+
+/* ============================================================================
+   FACE MODEL — landmarks -> smoothed, metric-ish 3D facial structure
+   ========================================================================== */
+const NLM = 478;
+const RING1 = 1.22, RING2 = 1.58;          // expansion rings around the face oval
+const RING1_D = 0.62, RING2_D = 0.24;      // their share of the oval's own depth
+const NV = NLM + FACE_OVAL.length*2;
+
+class FaceModel{
+  constructor(){
+    this.raw   = new Float32Array(NLM*3);
+    this.euro  = new OneEuroArray();
+    this.disp  = new Float32Array(NLM*3);   // render-time (interpolated) landmarks
+    this.hasDisp = false;
+    this.U = new Float32Array(NV);          // unit-space x  (image-height units)
+    this.V = new Float32Array(NV);          // unit-space y
+    this.D = new Float32Array(NV);          // metric depth, + = toward camera
+    this.verts  = new Float32Array(NV*2);   // uv positions for the field pass
+    this.depths = new Float32Array(NV);     // encoded depth 0..1
+    this.tris   = null;
+    this.triYaw = 999; this.triPitch = 999; this.triAt = 0;
+    this.dRangeSm = 0.05;
+    this.geom = null;
+  }
+  reset(){ this.euro.reset(); this.hasDisp=false; this.tris=null; this.triYaw=999; }
+
+  /** feed one detection (array of {x,y,z} normalised landmarks) */
+  ingest(lms, dt, smoothing){
+    if(!lms || lms.length < 468) return false;      // never zero-fill a partial set
+    const n = Math.min(lms.length, NLM);
+    for(let i=0;i<n;i++){ const L=lms[i]; this.raw[i*3]=L.x; this.raw[i*3+1]=L.y; this.raw[i*3+2]=L.z; }
+    const minCutoff = lerp(6.0, 0.45, clamp(smoothing,0,1));
+    const beta      = lerp(0.02, 0.006, clamp(smoothing,0,1));
+    const f = this.euro.filter(this.raw, dt, minCutoff, beta);
+    if(!this.hasDisp){ this.disp.set(f); this.hasDisp=true; }
+    this.target = f;
+    return true;
+  }
+  /** per-render-frame interpolation towards the latest filtered landmarks */
+  advance(t){
+    if(!this.hasDisp || !this.target) return;
+    const a = clamp(t,0,1), d=this.disp, s=this.target;
+    for(let i=0;i<d.length;i++) d[i] += (s[i]-d[i])*a;
+  }
+
+  /**
+   * Build the metric facial structure + field geometry for this frame.
+   * @param {number} aspect  image width / height
+   * @param {object} opt     {depthScale, Ds, Dt, sizeLock}
+   */
+  build(aspect, opt){
+    const d=this.disp, U=this.U, V=this.V, D=this.D;
+    const A=aspect;
+    for(let i=0;i<NLM;i++){
+      U[i]=(d[i*3]-0.5)*A;
+      V[i]= d[i*3+1]-0.5;
+    }
+    // z shares x's normalisation -> convert to image-height units
+    const Z = this._Z || (this._Z = new Float32Array(NLM));
+    for(let i=0;i<NLM;i++) Z[i]=d[i*3+2]*A;
+    this.rawZ = this.rawZ && this.rawZ.length===NLM ? this.rawZ : new Float32Array(NLM);
+    this.rawZ.set(Z);
+    /* a personal 3D scan replaces the single-frame depth estimate entirely */
+    this.usingScan=false;
+    if(opt.scan && opt.scan.model){
+      const zs=opt.scan.applyTo(U,V,Z);
+      if(zs){ Z.set(zs); this.usingScan=true; }
+    }
+
+    const sl=IDX.sideL, sr=IDX.sideR;
+    const w2 = Math.hypot(U[sr]-U[sl], V[sr]-V[sl]);
+    const w3 = Math.hypot(U[sr]-U[sl], V[sr]-V[sl], Z[sr]-Z[sl]);
+    if(!(w3>1e-5)) return null;
+    const kM = FACE_WIDTH_M / w3;               // metres per unit-space unit
+
+    // reference plane = mean depth of the face (keeps the warp balanced)
+    let zsum=0; for(let i=0;i<468;i++) zsum+=Z[i];
+    const zRef = zsum/468;
+
+    let dmax=0;
+    for(let i=0;i<NLM;i++){ D[i]=(zRef-Z[i])*kM; const a=Math.abs(D[i]); if(a>dmax)dmax=a; }
+
+    // face centre (projection centre for the magnification)
+    const cx=(U[IDX.sideL]+U[IDX.sideR]+U[IDX.forehead]+U[IDX.chin])/4;
+    const cy=(V[IDX.sideL]+V[IDX.sideR]+V[IDX.forehead]+V[IDX.chin])/4;
+
+    // expansion rings so the warp blends into temples / hair / jaw / neck
+    for(let k=0;k<FACE_OVAL.length;k++){
+      const i=FACE_OVAL[k], o1=NLM+k, o2=NLM+FACE_OVAL.length+k;
+      const dx=U[i]-cx, dy=V[i]-cy;
+      U[o1]=cx+dx*RING1; V[o1]=cy+dy*RING1; D[o1]=D[i]*RING1_D;
+      U[o2]=cx+dx*RING2; V[o2]=cy+dy*RING2; D[o2]=D[i]*RING2_D;
+    }
+
+    // adaptive encoding range (smoothed so it doesn't pump frame to frame)
+    const target = clamp(dmax*1.06, 0.012, 0.2);
+    this.dRangeSm += (target-this.dRangeSm)*0.15;
+    const dR = this.dRangeSm;
+
+    for(let i=0;i<NV;i++){
+      this.verts[i*2]   = U[i]/A + 0.5;
+      this.verts[i*2+1] = V[i] + 0.5;
+      this.depths[i]    = clamp(0.5 + 0.5*(D[i]/dR), 0, 1);
+    }
+
+    // pose (approximate, from landmark geometry)
+    const roll = Math.atan2(V[IDX.eyeRouter]-V[IDX.eyeLouter], U[IDX.eyeRouter]-U[IDX.eyeLouter])*180/Math.PI;
+    const yaw  = Math.asin(clamp((Z[sl]-Z[sr])/Math.max(w3,1e-5),-1,1))*180/Math.PI;
+    const h3   = Math.hypot(U[IDX.chin]-U[IDX.forehead], V[IDX.chin]-V[IDX.forehead], Z[IDX.chin]-Z[IDX.forehead]);
+    const pitch= Math.asin(clamp((Z[IDX.forehead]-Z[IDX.chin])/Math.max(h3,1e-5),-1,1))*180/Math.PI;
+
+    // topology: recompute only when the pose has changed appreciably
+    const now = performance.now();
+    if(!this.tris || (now-this.triAt>400 && (Math.abs(yaw-this.triYaw)>7 || Math.abs(pitch-this.triPitch)>7))){
+      this.tris = delaunay(U,V,NV);
+      this.triAt=now; this.triYaw=yaw; this.triPitch=pitch;
+    }
+
+    // uniform-scale normalisation (Procrustes): guarantees FACE SIZE LOCK holds
+    // exactly, independent of where the depth reference plane happens to sit.
+    let num=0, den=0;
+    const dmaxP = Math.min(dR*3, 0.45*Math.min(opt.Ds,opt.Dt));
+    for(let i=0;i<468;i+=2){
+      const rx=U[i]-cx, ry=V[i]-cy, r=Math.hypot(rx,ry);
+      if(r<1e-4) continue;
+      const dd = clamp(D[i]*opt.depthScale, -0.30, dmaxP);
+      const m = clamp(calcMagnification(dd,opt.Ds,opt.Dt),0.45,2.2);
+      const a = m*r;
+      num += a*a; den += a*r;
+    }
+    const s = den>1e-9 ? num/den : 1;
+    const norm = clamp(1/s, 0.5, 2);
+
+    const eyeL=[U[IDX.irisL],V[IDX.irisL]], eyeR=[U[IDX.irisR],V[IDX.irisR]];
+    this.geom = {
+      center:[cx,cy], faceWidthUnit:w2, faceWidth3D:w3, kMeters:kM,
+      dRange:dR, norm, yaw, pitch, roll,
+      eyeL, eyeR, eyeDist:Math.hypot(eyeR[0]-eyeL[0],eyeR[1]-eyeL[1]),
+      noseDepth:D[IDX.noseTip], faceFracW:w2/A,
+      top:V[IDX.forehead], bottom:V[IDX.chin]
+    };
+    return this.geom;
+  }
+}
+
+/* ============================================================================
+   TRACKER — MediaPipe Face Landmarker (loaded from CDN, no build step)
+   ========================================================================== */
+class Tracker{
+  constructor(){ this.lm=null; this.mode=null; this.loading=false; this.vision=null; }
+  /** Import the ES module. Opening the page straight off disk gives the document
+      a null origin, where some browsers refuse a cross-origin module import — so
+      fall back to fetching the source and importing it through a blob URL. */
+  static async importBundle(url){
+    try{ return await import(/* webpackIgnore: true */ url); }
+    catch(e){
+      const src = await fetch(url, {mode:"cors"}).then(r=>{ if(!r.ok) throw new Error(r.status); return r.text(); });
+      const blobUrl = URL.createObjectURL(new Blob([src], {type:"text/javascript"}));
+      try{ return await import(blobUrl); }
+      finally{ setTimeout(()=>URL.revokeObjectURL(blobUrl), 30000); }
+    }
+  }
+  async load(onStatus){
+    if(this.lm) return true;
+    if(this.loading) return this.loading;
+    this.loading = (async()=>{
+      let lastErr=null;
+      for(const base of MP_VERSIONS){
+        try{
+          onStatus && onStatus("Loading face model…");
+          const mod = await Tracker.importBundle(base+"/vision_bundle.mjs");
+          const fileset = await mod.FilesetResolver.forVisionTasks(base+"/wasm");
+          for(const model of MODEL_URLS) for(const delegate of ["GPU","CPU"]){
+            try{
+              this.lm = await mod.FaceLandmarker.createFromOptions(fileset,{
+                baseOptions:{ modelAssetPath:model, delegate },
+                runningMode:"IMAGE",
+                numFaces:4,
+                minFaceDetectionConfidence:0.4,
+                minFacePresenceConfidence:0.4,
+                minTrackingConfidence:0.4,
+                outputFaceBlendshapes:false,
+                outputFacialTransformationMatrixes:false
+              });
+              this.mode="IMAGE";
+              return true;
+            }catch(e){ lastErr=e; }
+          }
+        }catch(e){ lastErr=e; }
+      }
+      this.loading=null;
+      throw lastErr || new Error("Face model unavailable");
+    })();
+    return this.loading;
+  }
+  async setMode(m){
+    if(!this.lm || this.mode===m) return;
+    await this.lm.setOptions({runningMode:m});
+    this.mode=m;
+  }
+  detectVideo(video, ts){
+    if(!this.lm || this.mode!=="VIDEO") return null;
+    try{ return this.lm.detectForVideo(video, ts); }
+    catch(e){ if(!this._warned){ this._warned=true; console.warn("face tracker (video):",e); } return null; }
+  }
+  detectImage(el){
+    if(!this.lm || this.mode!=="IMAGE") return null;
+    try{ return this.lm.detect(el); }catch(e){ console.warn("face tracker (image):",e); return null; }
+  }
+}
+
+/* ============================================================================
+   PERSONAL 3D FACE SCAN
+   ----------------------------------------------------------------------------
+   A single frame gives only an *estimated* depth for each landmark. If the user
+   turns their head while we watch, the SAME landmark is seen from several
+   directions — and a landmark's depth d shows up in the (accurately measured)
+   image-x coordinate as sin(yaw)*d. Fusing keyframes across yaw therefore
+   recovers real, personal facial depth instead of a generic estimate.
+
+   Solver = classic alternating bundle adjustment with known correspondences:
+     1. align every keyframe to the current model  (Umeyama/Horn similarity fit)
+     2. re-solve every vertex by weighted least squares, trusting each frame's
+        x/y far more than its z  (W = diag(1,1,WZ))
+     3. repeat, then gauge-fix back onto the frontal frame.
+   ========================================================================== */
+const SCAN_WZ = 0.22;              // how much we trust a single frame's z
+const SCAN_BINS = 13, SCAN_BIN_DEG = 7;
+const SCAN_STORE = "fps.facescan.v1";
+
+/* eigenvector of the largest eigenvalue of a symmetric 4x4 (cyclic Jacobi) */
+function jacobiTop4(A){
+  const a=[A[0].slice(),A[1].slice(),A[2].slice(),A[3].slice()];
+  let V=[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]];
+  for(let sweep=0;sweep<24;sweep++){
+    let off=0;
+    for(let p=0;p<4;p++) for(let q=p+1;q<4;q++) off+=a[p][q]*a[p][q];
+    if(off<1e-18) break;
+    for(let p=0;p<4;p++) for(let q=p+1;q<4;q++){
+      if(Math.abs(a[p][q])<1e-15) continue;
+      const theta=(a[q][q]-a[p][p])/(2*a[p][q]);
+      const t=Math.sign(theta||1)/(Math.abs(theta)+Math.sqrt(theta*theta+1));
+      const c=1/Math.sqrt(t*t+1), sn=t*c;
+      for(let k=0;k<4;k++){
+        const akp=a[k][p], akq=a[k][q];
+        a[k][p]=c*akp-sn*akq; a[k][q]=sn*akp+c*akq;
+      }
+      for(let k=0;k<4;k++){
+        const apk=a[p][k], aqk=a[q][k];
+        a[p][k]=c*apk-sn*aqk; a[q][k]=sn*apk+c*aqk;
+      }
+      for(let k=0;k<4;k++){
+        const vkp=V[k][p], vkq=V[k][q];
+        V[k][p]=c*vkp-sn*vkq; V[k][q]=sn*vkp+c*vkq;
+      }
+    }
+  }
+  let best=0;
+  for(let i=1;i<4;i++) if(a[i][i]>a[best][best]) best=i;
+  return [V[0][best],V[1][best],V[2][best],V[3][best]];
+}
+/** Umeyama/Horn similarity fit:  find s,R,t minimising |s*R*src + t - dst|^2 */
+function similarityFit(src, dst, n){
+  let cxa=0,cya=0,cza=0,cxb=0,cyb=0,czb=0;
+  for(let i=0;i<n;i++){
+    cxa+=src[i*3]; cya+=src[i*3+1]; cza+=src[i*3+2];
+    cxb+=dst[i*3]; cyb+=dst[i*3+1]; czb+=dst[i*3+2];
+  }
+  cxa/=n; cya/=n; cza/=n; cxb/=n; cyb/=n; czb/=n;
+  let Sxx=0,Sxy=0,Sxz=0,Syx=0,Syy=0,Syz=0,Szx=0,Szy=0,Szz=0,na=0,dot=0;
+  for(let i=0;i<n;i++){
+    const ax=src[i*3]-cxa, ay=src[i*3+1]-cya, az=src[i*3+2]-cza;
+    const bx=dst[i*3]-cxb, by=dst[i*3+1]-cyb, bz=dst[i*3+2]-czb;
+    Sxx+=ax*bx; Sxy+=ax*by; Sxz+=ax*bz;
+    Syx+=ay*bx; Syy+=ay*by; Syz+=ay*bz;
+    Szx+=az*bx; Szy+=az*by; Szz+=az*bz;
+    na+=ax*ax+ay*ay+az*az;
+  }
+  const N=[
+    [Sxx+Syy+Szz, Syz-Szy,      Szx-Sxz,      Sxy-Syx],
+    [Syz-Szy,     Sxx-Syy-Szz,  Sxy+Syx,      Szx+Sxz],
+    [Szx-Sxz,     Sxy+Syx,     -Sxx+Syy-Szz,  Syz+Szy],
+    [Sxy-Syx,     Szx+Sxz,      Syz+Szy,     -Sxx-Syy+Szz]
+  ];
+  const q=jacobiTop4(N);
+  let ql=Math.hypot(q[0],q[1],q[2],q[3])||1;
+  const w=q[0]/ql, x=q[1]/ql, y=q[2]/ql, z=q[3]/ql;
+  const R=[
+    1-2*(y*y+z*z), 2*(x*y-w*z),   2*(x*z+w*y),
+    2*(x*y+w*z),   1-2*(x*x+z*z), 2*(y*z-w*x),
+    2*(x*z-w*y),   2*(y*z+w*x),   1-2*(x*x+y*y)
+  ];
+  for(let i=0;i<n;i++){
+    const ax=src[i*3]-cxa, ay=src[i*3+1]-cya, az=src[i*3+2]-cza;
+    const bx=dst[i*3]-cxb, by=dst[i*3+1]-cyb, bz=dst[i*3+2]-czb;
+    dot += bx*(R[0]*ax+R[1]*ay+R[2]*az) + by*(R[3]*ax+R[4]*ay+R[5]*az) + bz*(R[6]*ax+R[7]*ay+R[8]*az);
+  }
+  const s = na>1e-12 ? dot/na : 1;
+  const t=[cxb-s*(R[0]*cxa+R[1]*cya+R[2]*cza),
+           cyb-s*(R[3]*cxa+R[4]*cya+R[5]*cza),
+           czb-s*(R[6]*cxa+R[7]*cya+R[8]*cza)];
+  return {R,s,t};
+}
+function solve3(M,b){
+  const det=M[0]*(M[4]*M[8]-M[5]*M[7])-M[1]*(M[3]*M[8]-M[5]*M[6])+M[2]*(M[3]*M[7]-M[4]*M[6]);
+  if(Math.abs(det)<1e-16) return null;
+  const i=1/det;
+  return [
+    i*((M[4]*M[8]-M[5]*M[7])*b[0]+(M[2]*M[7]-M[1]*M[8])*b[1]+(M[1]*M[5]-M[2]*M[4])*b[2]),
+    i*((M[5]*M[6]-M[3]*M[8])*b[0]+(M[0]*M[8]-M[2]*M[6])*b[1]+(M[2]*M[3]-M[0]*M[5])*b[2]),
+    i*((M[3]*M[7]-M[4]*M[6])*b[0]+(M[1]*M[6]-M[0]*M[7])*b[1]+(M[0]*M[4]-M[1]*M[3])*b[2])
+  ];
+}
+
+class FaceScan{
+  constructor(){
+    this.frames=[];       // {P:Float32Array(NLM*3), yaw, pitch}
+    this.bins=new Array(SCAN_BINS).fill(0);
+    this.model=null;      // Float32Array(NLM*3), personal 3D face
+    this.quality=0;       // 0..1
+    this.span=0;
+    this.fit=null; this.fitZ=new Float32Array(NLM);
+    this.load();
+  }
+  reset(){ this.frames=[]; this.bins.fill(0); }
+  binOf(yaw){ return clamp(Math.round(yaw/SCAN_BIN_DEG)+((SCAN_BINS-1)>>1), 0, SCAN_BINS-1); }
+  /** @param P Float32Array(NLM*3) points in a common unit space for this frame */
+  addFrame(P, yaw, pitch){
+    if(Math.abs(pitch)>28) return false;
+    const b=this.binOf(yaw);
+    if(this.bins[b]>=2) return false;
+    this.bins[b]++;
+    this.frames.push({P:Float32Array.from(P), yaw, pitch});
+    return true;
+  }
+  coverage(){
+    let filled=0, lo=99, hi=-99;
+    for(let i=0;i<SCAN_BINS;i++) if(this.bins[i]){
+      filled++;
+      const c=(i-((SCAN_BINS-1)>>1))*SCAN_BIN_DEG;
+      lo=Math.min(lo,c); hi=Math.max(hi,c);
+    }
+    const span=filled?hi-lo:0;
+    const left=this.bins.slice(0,(SCAN_BINS-1)>>1).some(Boolean);
+    const right=this.bins.slice(((SCAN_BINS-1)>>1)+1).some(Boolean);
+    const centre=this.bins[(SCAN_BINS-1)>>1]>0;
+    return {filled, span, left, right, centre,
+            done: centre&&left&&right&&span>=28&&this.frames.length>=8,
+            progress: clamp((filled/7)*0.5 + (clamp(span,0,45)/45)*0.5, 0, 1)};
+  }
+  /** alternating bundle adjustment over the captured keyframes */
+  solve(){
+    const F=this.frames;
+    if(F.length<4) return false;
+    let ref=F[0];
+    for(const f of F) if(Math.abs(f.yaw)<Math.abs(ref.yaw)) ref=f;
+    let P=Float32Array.from(ref.P);
+    const M=new Float64Array(9), bb=new Float64Array(3);
+    for(let iter=0; iter<4; iter++){
+      const T=F.map(f=>similarityFit(P, f.P, NLM));
+      for(let v=0; v<NLM; v++){
+        M.fill(0); bb.fill(0);
+        for(let k=0;k<F.length;k++){
+          const {R,s,t}=T[k], m=F[k].P;
+          /* A = s*R  (model -> this frame's camera space) */
+          const A=[s*R[0],s*R[1],s*R[2], s*R[3],s*R[4],s*R[5], s*R[6],s*R[7],s*R[8]];
+          const r=[m[v*3]-t[0], m[v*3+1]-t[1], m[v*3+2]-t[2]];
+          const w=[1,1,SCAN_WZ];
+          for(let row=0;row<3;row++){
+            const ww=w[row]*w[row];
+            const a0=A[row*3], a1=A[row*3+1], a2=A[row*3+2];
+            M[0]+=ww*a0*a0; M[1]+=ww*a0*a1; M[2]+=ww*a0*a2;
+            M[3]+=ww*a1*a0; M[4]+=ww*a1*a1; M[5]+=ww*a1*a2;
+            M[6]+=ww*a2*a0; M[7]+=ww*a2*a1; M[8]+=ww*a2*a2;
+            bb[0]+=ww*a0*r[row]; bb[1]+=ww*a1*r[row]; bb[2]+=ww*a2*r[row];
+          }
+        }
+        for(let d=0;d<9;d+=4) M[d]+=1e-7;          // tiny ridge for stability
+        const X=solve3(M,bb);
+        if(X){ P[v*3]=X[0]; P[v*3+1]=X[1]; P[v*3+2]=X[2]; }
+      }
+      /* gauge fix: keep the model in the frontal frame's pose and scale */
+      const g=similarityFit(P, ref.P, NLM);
+      const out=new Float32Array(NLM*3);
+      for(let v=0;v<NLM;v++){
+        const x=P[v*3],y=P[v*3+1],z=P[v*3+2];
+        out[v*3]  =g.s*(g.R[0]*x+g.R[1]*y+g.R[2]*z)+g.t[0];
+        out[v*3+1]=g.s*(g.R[3]*x+g.R[4]*y+g.R[5]*z)+g.t[1];
+        out[v*3+2]=g.s*(g.R[6]*x+g.R[7]*y+g.R[8]*z)+g.t[2];
+      }
+      P=out;
+    }
+    /* quality = xy reprojection agreement + angular coverage */
+    let err=0, n=0;
+    for(const f of F){
+      const T=similarityFit(P, f.P, NLM);
+      for(let v=0;v<NLM;v+=4){
+        const x=P[v*3],y=P[v*3+1],z=P[v*3+2];
+        const px=T.s*(T.R[0]*x+T.R[1]*y+T.R[2]*z)+T.t[0];
+        const py=T.s*(T.R[3]*x+T.R[4]*y+T.R[5]*z)+T.t[1];
+        err+=Math.hypot(px-f.P[v*3], py-f.P[v*3+1]); n++;
+      }
+    }
+    const cov=this.coverage();
+    const rms=err/Math.max(n,1);
+    this.model=P;
+    this.span=cov.span;
+    this.quality=clamp((1-clamp(rms/0.012,0,1))*0.5 + clamp(cov.span/55,0,1)*0.5, 0, 1);
+    this.save();
+    return true;
+  }
+  /** fit the personal model onto the current frame; returns model z per landmark */
+  applyTo(U,V,Z){
+    if(!this.model) return null;
+    const meas=this._meas||(this._meas=new Float32Array(NLM*3));
+    for(let i=0;i<NLM;i++){ meas[i*3]=U[i]; meas[i*3+1]=V[i]; meas[i*3+2]=Z[i]; }
+    const T=similarityFit(this.model, meas, NLM);
+    const R=T.R, s=T.s, t=T.t, P=this.model, out=this.fitZ;
+    for(let i=0;i<NLM;i++){
+      const x=P[i*3],y=P[i*3+1],z=P[i*3+2];
+      out[i]=s*(R[6]*x+R[7]*y+R[8]*z)+t[2];
+    }
+    this.fit=T;
+    return out;
+  }
+  save(){
+    try{
+      if(!this.model) return;
+      localStorage.setItem(SCAN_STORE, JSON.stringify({
+        v:1, q:this.quality, span:this.span,
+        p:Array.from(this.model, x=>Math.round(x*100000)/100000)
+      }));
+    }catch(e){}
+  }
+  load(){
+    try{
+      const raw=localStorage.getItem(SCAN_STORE); if(!raw) return;
+      const o=JSON.parse(raw);
+      if(o && o.v===1 && o.p && o.p.length===NLM*3){
+        this.model=Float32Array.from(o.p); this.quality=o.q||0.5; this.span=o.span||0;
+      }
+    }catch(e){}
+  }
+  clear(){ this.model=null; this.quality=0; this.span=0; this.reset(); try{localStorage.removeItem(SCAN_STORE);}catch(e){} }
+}
+
+/* ============================================================================
+   APPLICATION STATE
+   ========================================================================== */
+const S = {
+  source:"none",        // "none" | "camera" | "photo"
+  srcFt:3,              // source (original) camera distance
+  tgtFt:3,              // simulated camera distance
+  sizeLock:true,
+  strength:1.0,         // perspective strength 0..1.5
+  depthScale:1.0,
+  blend:1.0,            // warp falloff radius multiplier
+  smoothing:0.5,
+  mirror:true,
+  align:false,
+  showMesh:false,
+  compare:"sim",        // "sim" | "orig" | "split"
+  split:0.5,
+  holding:false,
+  ctlMode:"distance",   // "distance" | "focal"
+  focalMm:50,
+  sensor:"ff",
+  customSensor:36,
+  fovDeg:60,
+  debug:false,
+  faceIdx:0,
+  deviceId:null,
+  srcEstimated:false,
+  immersive:false,
+  useScan:true,        // use the personal 3D scan for depth when one exists
+  scanning:false,
+  view3d:0,            // 0 = off, 1 = textured, 2 = shaded clay
+  yaw3d:0, pitch3d:0, spin3d:true, spinT:0
+};
+
+const R = {
+  ren:null, fm:new FaceModel(), tr:new Tracker(),
+  canvas:null, video:null, image:null, stream:null,
+  srcW:0, srcH:0, aspect:1,
+  faces:[], detected:false, lastSeen:0, lastDetect:0, lastVideoTime:-1,
+  view:{z:1,cx:0,cy:0,rot:0}, viewSm:{z:0,cx:0,cy:0,rot:0}, viewInit:false,
+  fps:60, frameMs:0, trackerFps:0, trackerMs:0, lastFrame:0,
+  running:false, modelReady:false, synthetic:false, devices:[],
+  scan:null, scanBuf:null, lastScanAt:0
+};
+
+/* ------------------------------- DOM refs --------------------------------- */
+const el = {};
+["view","topbar","panel","intro","status","errcard","errTitle","errMsg","errRetry","errUpload","errClose",
+ "dropzone","debug","fileInput","video","splitline","facepicks","presets","advInner","advToggle","advanced",
+ "mainSlider","sliderMin","sliderMax","distMain","distMetric","distLabel","mSrc","mTgt","mFocal",
+ "segCompare","btnHold","btnSource","btnMirror","btnAlign","btnMesh","btnSave","btnReset","btnFull",
+ "btnScan","scanui","scanInstr","scanDots","scanBar","scanSub","scanCancel","scanDone","btn3d","hint3d",
+ "introCam","introUpload","stage",
+ "dFps","dFrame","dTfps","dLm","dConf","dTri","dGl","dSrc","dTgt","dRatio","dFocal","dFw","dNose",
+ "dYaw","dPitch","dRoll","dvDepth","dvDepthV","dvFall","dvFallV","dvSmooth","dvSmoothV"
+].forEach(id=>{ el[id]=document.getElementById(id); });
+
+/* ------------------------------ status pill -------------------------------- */
+let statusTimer=null;
+function setStatus(text, kind, autoHide){
+  clearTimeout(statusTimer);
+  if(!text){ el.status.classList.remove("show"); return; }
+  el.status.className = "status show" + (kind?(" "+kind):"");
+  el.status.innerHTML = (kind==="load"? '<span class="spin"></span>' : '<span class="dot"></span>') +
+                        '<span class="txt"></span>';
+  el.status.querySelector(".txt").textContent = text;
+  if(autoHide) statusTimer=setTimeout(()=>el.status.classList.remove("show"), autoHide);
+}
+function showError(title, msg, opts){
+  opts=opts||{};
+  el.errTitle.textContent=title; el.errMsg.textContent=msg;
+  el.errRetry.classList.toggle("hide", !opts.retry);
+  el.errUpload.classList.toggle("hide", !opts.upload);
+  el.errClose.classList.toggle("hide", !opts.close);
+  el.errcard.classList.remove("hide");
+  R.errRetry = opts.onRetry||null;
+}
+function hideError(){ el.errcard.classList.add("hide"); }
+
+/* ---------------------------- unit helpers -------------------------------- */
+const srcM = ()=>S.srcFt*FT;
+const tgtM = ()=>S.tgtFt*FT;
+function sensorWidthMm(){ return S.sensor==="custom" ? clamp(S.customSensor,1,120) : SENSORS[S.sensor]; }
+
+/** Geometry of the frame the viewer actually sees, in image-height units.
+    A letterboxed photo shows the image (aspect A); otherwise the canvas crops
+    it, so the visible frame is the canvas. Both the equivalent focal length and
+    the face's framing fraction must be measured against the same rectangle. */
+function visibleFrame(){
+  const ca = (R.canvas && R.canvas.height) ? R.canvas.width/R.canvas.height : 1;
+  const A  = R.aspect||1, z = R.viewSm.z||1;
+  const w  = Math.min(A, ca/z);          // visible width  (image-height units)
+  const h  = Math.min(1, 1/z);           // visible height (image-height units)
+  return {w, h, aspect: w/Math.max(h,1e-6)};
+}
+/** the sensor dimension along the visible frame's horizontal axis */
+function sensorXmm(){
+  return sensorWidthMm() * Math.min(1, visibleFrame().aspect);
+}
+/** face width as a fraction of the *visible* frame width */
+function faceScreenFrac(geom, globalScale){
+  if(!geom || !R.canvas) return 0;
+  return geom.faceWidthUnit * globalScale / Math.max(visibleFrame().w, 1e-6);
+}
+/** equivalent full-frame focal length implied by the current framing */
+function equivalentFocal(geom, globalScale){
+  const f = faceScreenFrac(geom, globalScale);
+  if(!(f>0.001)) return null;
+  const frameWidthM = FACE_WIDTH_M / f;
+  return sensorXmm() * tgtM() / frameWidthM;
+}
+/** invert the above: what distance gives this focal length at the locked framing */
+function distanceForFocal(mm){
+  const g = R.fm.geom; if(!g) return null;
+  const f = faceScreenFrac(g, 1);
+  if(!(f>0.001)) return null;
+  const frameWidthM = FACE_WIDTH_M / f;
+  return mm * frameWidthM / sensorXmm();       // metres
+}
+/** the frame's horizontal half-FOV, correcting for portrait vs landscape:
+    a camera's field of view is fixed along the sensor's LONG edge */
+function halfFovX(){
+  const A=R.aspect||1;
+  const t=Math.tan(clamp(S.fovDeg,20,140)*Math.PI/360);
+  return Math.atan(A>=1 ? t : t*A);
+}
+/** rough source-distance estimate from face size + assumed camera FOV */
+function estimateSourceDistance(){
+  const g=R.fm.geom; if(!g) return null;
+  const d = FACE_WIDTH_M / (2*Math.max(g.faceFracW,0.01)*Math.tan(halfFovX()));
+  return clamp(d, 0.2, 15);
+}
+/** calibrated source distance from an EXIF 35 mm-equivalent focal length */
+function distanceFromExif(f35){
+  const g=R.fm.geom; if(!g||!(f35>1)) return null;
+  const A=R.aspect||1;
+  const sensorX = A>=1 ? 36 : 36*A;          // long edge = 36 mm full-frame equivalent
+  const frameWidthM = FACE_WIDTH_M/Math.max(g.faceFracW,0.01);
+  return clamp(f35*frameWidthM/sensorX, 0.2, 30);   // (A is R.aspect, read above)
+}
+/** minimal JPEG EXIF reader: 35 mm-equivalent focal length (0xA405 / 0x920A) */
+function readExifFocal35(buf){
+  try{
+    const dv=new DataView(buf);
+    if(dv.getUint16(0)!==0xFFD8) return null;
+    let off=2;
+    while(off<dv.byteLength-4){
+      if(dv.getUint8(off)!==0xFF) { off++; continue; }
+      const marker=dv.getUint8(off+1), size=dv.getUint16(off+2);
+      if(marker===0xE1 && dv.getUint32(off+4)===0x45786966){
+        const tiff=off+10;
+        const le = dv.getUint16(tiff)===0x4949;
+        const u16=o=>dv.getUint16(o,le), u32=o=>dv.getUint32(o,le);
+        const readIFD=(base)=>{
+          const n=u16(base); const found={};
+          for(let i=0;i<n;i++){
+            const e=base+2+i*12, tag=u16(e), type=u16(e+2), cnt=u32(e+4);
+            let val=null;
+            if(type===3) val=u16(e+8);
+            else if(type===4) val=u32(e+8);
+            else if(type===5){ const p=tiff+u32(e+8); if(p+8<=dv.byteLength){ const num=u32(p), den=u32(p+4); val=den?num/den:null; } }
+            found[tag]={val,type,cnt,off:e};
+          }
+          return found;
+        };
+        const ifd0=readIFD(tiff+u32(tiff+4));
+        if(ifd0[0x8769]){
+          const exif=readIFD(tiff+ifd0[0x8769].val);
+          /* only FocalLengthIn35mmFilm is directly usable — the raw FocalLength
+             (0x920A) is meaningless without the sensor's crop factor */
+          if(exif[0xA405] && exif[0xA405].val) return exif[0xA405].val;
+        }
+        return null;
+      }
+      if(marker===0xD8||marker===0xD9) off+=2; else off+=2+size;
+    }
+  }catch(e){}
+  return null;
+}
+
+/* ============================================================================
+   UI CONSTRUCTION
+   ========================================================================== */
+function buildPresets(){
+  el.presets.innerHTML="";
+  PRESETS.forEach(p=>{
+    const b=document.createElement("button");
+    b.textContent=p.label; b.dataset.ft=p.ft;
+    b.title = p.ft>=MAX_FT ? "Near-orthographic (10,000 ft)" : p.ft+" ft";
+    b.addEventListener("click",()=>{ setTarget(p.ft); });
+    el.presets.appendChild(b);
+  });
+}
+function row(label, node, valNode){
+  const d=document.createElement("div"); d.className="ctl";
+  const l=document.createElement("label"); l.textContent=label;
+  d.appendChild(l); d.appendChild(node);
+  if(valNode) d.appendChild(valNode);
+  return d;
+}
+function mkRange(min,max,step,val,oninput){
+  const i=document.createElement("input");
+  i.type="range"; i.className="mini"; i.min=min; i.max=max; i.step=step; i.value=val;
+  i.addEventListener("input",()=>oninput(parseFloat(i.value)));
+  return i;
+}
+function mkVal(){ const s=document.createElement("span"); s.className="val"; return s; }
+function mkSwitch(val,onchange){
+  const b=document.createElement("button"); b.className="sw"+(val?" on":"");
+  b.setAttribute("role","switch"); b.setAttribute("aria-checked",String(!!val));
+  b.addEventListener("click",()=>{ const v=!b.classList.contains("on"); b.classList.toggle("on",v); b.setAttribute("aria-checked",String(v)); onchange(v); });
+  return b;
+}
+function mkSeg(options,val,onchange){
+  const w=document.createElement("div"); w.className="seg"; w.style.flex="1";
+  options.forEach(o=>{
+    const b=document.createElement("button"); b.textContent=o.label; b.dataset.v=o.v;
+    b.className = (o.v===val?"on":"");
+    b.addEventListener("click",()=>{ w.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b)); onchange(o.v); });
+    w.appendChild(b);
+  });
+  return w;
+}
+function mkChips(values, fmt, onpick){
+  const w=document.createElement("div"); w.className="chips";
+  values.forEach(v=>{
+    const b=document.createElement("button"); b.textContent=fmt(v); b.dataset.v=v;
+    b.addEventListener("click",()=>onpick(v));
+    w.appendChild(b);
+  });
+  return w;
+}
+const UI = {};   // handles to controls that need syncing
+
+function buildAdvanced(){
+  const box=el.advInner; box.innerHTML="";
+
+  /* perspective strength */
+  UI.strengthV=mkVal();
+  UI.strength=mkRange(0,1.5,0.01,S.strength,v=>{ S.strength=v; syncAdvanced(); });
+  box.appendChild(row("Perspective strength", UI.strength, UI.strengthV));
+  const note=document.createElement("div");
+  note.className="adv-note";
+  note.textContent="100% is the physically estimated simulation. Below that blends toward the original; above exaggerates for demonstration.";
+  box.appendChild(note);
+
+  /* face size lock */
+  UI.lock=mkSwitch(S.sizeLock,v=>{ S.sizeLock=v; updateUI(); });
+  box.appendChild(row("Face size lock", UI.lock));
+
+  /* control mode */
+  UI.mode=mkSeg([{v:"distance",label:"DISTANCE"},{v:"focal",label:"FOCAL LENGTH"}],S.ctlMode,v=>{
+    S.ctlMode=v;
+    if(v==="focal"){ const mm=equivalentFocal(R.fm.geom,1); if(mm) S.focalMm=clamp(mm,14,300); }
+    syncSlider(); updateUI();
+  });
+  box.appendChild(row("Control", UI.mode));
+  const note2=document.createElement("div");
+  note2.className="adv-note";
+  note2.textContent="Focal length alone does not change facial perspective — only camera position does. In focal-length mode the app moves the virtual camera to whatever distance keeps the same framing at that focal length, which is what produces the familiar 24 mm vs 135 mm portrait difference.";
+  box.appendChild(note2);
+
+  /* source distance */
+  UI.srcV=mkVal();
+  UI.src=mkRange(0,1,0.0001,ftToSlider(S.srcFt),v=>{
+    S.srcFt=clamp(sliderToFt(v),1,20); S.srcEstimated=false;
+    if(S.ctlMode==="focal") retargetFromFocal();
+    syncAdvanced(); updateUI();
+  });
+  box.appendChild(row("Source distance", UI.src, UI.srcV));
+  UI.srcChips=mkChips(SRC_PRESETS,v=>v+" ft",v=>{ S.srcFt=v; S.srcEstimated=false; syncAdvanced(); updateUI(); });
+  const estBtn=document.createElement("button");
+  estBtn.textContent="Estimate"; estBtn.style.cssText="padding:5px 9px;border-radius:8px;font-size:11.5px;background:rgba(10,132,255,.28);color:#9dcbff";
+  estBtn.addEventListener("click",()=>{
+    const d=estimateSourceDistance();
+    if(d){ S.srcFt=clamp(d/FT,0.5,30); S.srcEstimated=true; syncAdvanced(); updateUI();
+           setStatus("Estimated source distance ≈ "+fmtFtShort(S.srcFt),"ok",2600); }
+    else setStatus("Need a detected face to estimate","err",2400);
+  });
+  UI.srcChips.appendChild(estBtn);
+  box.appendChild(row("", UI.srcChips));
+
+  /* sensor / equivalent camera */
+  UI.sensor=document.createElement("select");
+  [["ff","Full Frame (36 mm)"],["apsc","APS-C (23.6 mm)"],["phone","Phone / Generic (7.6 mm)"],["custom","Custom…"]]
+    .forEach(([v,t])=>{ const o=document.createElement("option"); o.value=v; o.textContent=t; UI.sensor.appendChild(o); });
+  UI.sensor.value=S.sensor;
+  UI.sensor.addEventListener("change",()=>{ S.sensor=UI.sensor.value; syncAdvanced(); updateUI(); });
+  box.appendChild(row("Equivalent camera", UI.sensor));
+  UI.customSensor=document.createElement("input");
+  UI.customSensor.type="number"; UI.customSensor.min="1"; UI.customSensor.max="120"; UI.customSensor.step="0.1";
+  UI.customSensor.value=S.customSensor;
+  UI.customSensor.addEventListener("input",()=>{ S.customSensor=parseFloat(UI.customSensor.value)||36; updateUI(); });
+  UI.customRow=row("Sensor width (mm)", UI.customSensor);
+  box.appendChild(UI.customRow);
+
+  /* field of view (for source estimation) */
+  UI.fovV=mkVal();
+  UI.fov=mkRange(30,110,1,S.fovDeg,v=>{ S.fovDeg=v; syncAdvanced(); });
+  box.appendChild(row("Camera field of view", UI.fov, UI.fovV));
+
+  /* depth + mesh */
+  UI.depthV=mkVal();
+  UI.depth=mkRange(0,2.5,0.01,S.depthScale,v=>{ S.depthScale=v; syncAdvanced(); });
+  box.appendChild(row("Depth strength", UI.depth, UI.depthV));
+
+  UI.blendV=mkVal();
+  UI.blend=mkRange(0.3,2.5,0.01,S.blend,v=>{ S.blend=v; syncAdvanced(); });
+  box.appendChild(row("Face mesh blend", UI.blend, UI.blendV));
+
+  UI.smoothV=mkVal();
+  UI.smooth=mkRange(0,1,0.01,S.smoothing,v=>{ S.smoothing=v; syncAdvanced(); });
+  box.appendChild(row("Landmark smoothing", UI.smooth, UI.smoothV));
+
+  /* toggles */
+  UI.alignSw=mkSwitch(S.align,v=>{ S.align=v; el.btnAlign.classList.toggle("on",v); });
+  box.appendChild(row("Head stabilization", UI.alignSw));
+  UI.mirrorSw=mkSwitch(S.mirror,v=>{ S.mirror=v; el.btnMirror.classList.toggle("on",v); });
+  box.appendChild(row("Mirror view", UI.mirrorSw));
+  UI.meshSw=mkSwitch(S.showMesh,v=>{ S.showMesh=v; el.btnMesh.classList.toggle("on",v); });
+  box.appendChild(row("Show face mesh", UI.meshSw));
+
+  /* personal 3D scan */
+  UI.scanRow=document.createElement("div"); UI.scanRow.className="chips";
+  const bScan=document.createElement("button"); bScan.textContent="Start 3D scan";
+  bScan.style.cssText="padding:6px 10px;background:rgba(10,132,255,.28);color:#9dcbff";
+  bScan.addEventListener("click",startScan);
+  const bClear=document.createElement("button"); bClear.textContent="Clear scan";
+  bClear.addEventListener("click",()=>{ R.scan.clear(); el.btnScan.classList.remove("on"); syncAdvanced(); setStatus("3D scan cleared","ok",1800); });
+  const bObj=document.createElement("button"); bObj.textContent="Export .obj";
+  bObj.addEventListener("click",downloadModel);
+  UI.scanRow.appendChild(bScan); UI.scanRow.appendChild(bClear); UI.scanRow.appendChild(bObj);
+  UI.scanBtn=bScan; UI.scanClear=bClear;
+  UI.scanSw=mkSwitch(S.useScan,v=>{ S.useScan=v; el.btnScan.classList.toggle("on", v&&!!R.scan.model); });
+  UI.scanSwRow=row("3D scan depth", UI.scanSw);
+  box.appendChild(UI.scanSwRow);
+  box.appendChild(row("", UI.scanRow));
+  UI.scanNote=document.createElement("div"); UI.scanNote.className="adv-note";
+  box.appendChild(UI.scanNote);
+
+  /* camera picker */
+  UI.camSel=document.createElement("select");
+  UI.camSel.addEventListener("change",()=>{ S.deviceId=UI.camSel.value; startCamera(S.deviceId); });
+  UI.camRow=row("Camera", UI.camSel);
+  box.appendChild(UI.camRow);
+
+  syncAdvanced();
+}
+function syncAdvanced(){
+  if(!UI.strength) return;
+  UI.strength.value=S.strength; UI.strengthV.textContent=Math.round(S.strength*100)+"%";
+  UI.src.value=ftToSlider(S.srcFt);
+  UI.srcV.textContent=(S.srcEstimated?"≈ ":"")+fmtFtShort(S.srcFt);
+  UI.srcChips.querySelectorAll("button[data-v]").forEach(b=>b.classList.toggle("on", Math.abs(parseFloat(b.dataset.v)-S.srcFt)<0.02));
+  UI.fov.value=S.fovDeg; UI.fovV.textContent=S.fovDeg+"°";
+  UI.depth.value=S.depthScale; UI.depthV.textContent=Math.round(S.depthScale*100)+"%";
+  UI.blend.value=S.blend; UI.blendV.textContent=Math.round(S.blend*100)+"%";
+  UI.smooth.value=S.smoothing; UI.smoothV.textContent=Math.round(S.smoothing*100)+"%";
+  UI.lock.classList.toggle("on",S.sizeLock);
+  UI.alignSw.classList.toggle("on",S.align);
+  UI.mirrorSw.classList.toggle("on",S.mirror);
+  UI.meshSw.classList.toggle("on",S.showMesh);
+  UI.sensor.value=S.sensor;
+  UI.customRow.classList.toggle("hide", S.sensor!=="custom");
+  UI.camRow.classList.toggle("hide", S.source!=="camera" || R.devices.length<2);
+  const hasScan=!!(R.scan&&R.scan.model);
+  UI.scanSw.classList.toggle("on", S.useScan);
+  UI.scanSwRow.style.opacity=hasScan?"1":"0.45";
+  UI.scanBtn.textContent=hasScan?"Rescan":"Start 3D scan";
+  UI.scanClear.classList.toggle("hide",!hasScan);
+  UI.scanNote.textContent = hasScan
+    ? ("Using your scanned facial geometry (accuracy "+Math.round(R.scan.quality*100)+"%, "+Math.round(R.scan.span)+"° captured). Turn this off to compare against the single-frame depth estimate.")
+    : "Depth is currently estimated from a single frame. Run a 3D scan with the live camera — turn your head slowly left and right — to measure your real facial depth and use it for both camera and photos.";
+  UI.mode.querySelectorAll("button").forEach(b=>b.classList.toggle("on", b.dataset.v===S.ctlMode));
+  el.dvDepth.value=S.depthScale; el.dvDepthV.textContent=S.depthScale.toFixed(2);
+  el.dvFall.value=S.blend; el.dvFallV.textContent=S.blend.toFixed(2);
+  el.dvSmooth.value=S.smoothing; el.dvSmoothV.textContent=S.smoothing.toFixed(2);
+}
+
+/* --------------------------- distance plumbing ----------------------------- */
+function setTarget(ft, fromSlider){
+  S.tgtFt = clamp(ft, MIN_FT, MAX_FT);
+  if(S.ctlMode==="focal"){
+    const mm = equivalentFocal(R.fm.geom, 1);
+    if(mm) S.focalMm = clamp(mm,14,300);
+  }
+  if(!fromSlider) syncSlider();
+  updateUI();
+}
+function retargetFromFocal(){
+  const d=distanceForFocal(S.focalMm);
+  if(d) S.tgtFt = clamp(d/FT, MIN_FT, MAX_FT);
+}
+function syncSlider(){
+  if(S.ctlMode==="distance"){
+    el.mainSlider.value = ftToSlider(S.tgtFt);
+    el.sliderMin.textContent="1 ft"; el.sliderMax.textContent="10,000 ft";
+  }else{
+    const t=(Math.log(S.focalMm)-Math.log(14))/(Math.log(300)-Math.log(14));
+    el.mainSlider.value=clamp(t,0,1);
+    el.sliderMin.textContent="14 mm"; el.sliderMax.textContent="300 mm";
+  }
+}
+function onSlider(){
+  const t=parseFloat(el.mainSlider.value);
+  if(S.ctlMode==="distance"){ setTarget(sliderToFt(t), true); }
+  else{
+    S.focalMm = Math.exp(lerp(Math.log(14),Math.log(300),t));
+    retargetFromFocal(); updateUI();
+  }
+}
+
+/* ============================================================================
+   UI UPDATE
+   ========================================================================== */
+let lastUIat=0;
+function updateUI(){
+  const ft=S.tgtFt, m=tgtM();
+  el.mainSlider.setAttribute("aria-valuetext",
+    S.ctlMode==="distance" ? (fmtFtShort(ft)+" ("+fmtMetric(m)+")") : (Math.round(S.focalMm)+" mm equivalent"));
+  if(S.ctlMode==="distance"){
+    el.distMain.innerHTML = fmtFt(ft)+'<small>ft</small>';
+    el.distMetric.textContent = fmtMetric(m);
+  }else{
+    el.distMain.innerHTML = Math.round(S.focalMm)+'<small>mm</small>';
+    el.distMetric.textContent = fmtFtShort(ft)+"  ·  "+fmtMetric(m);
+  }
+  el.distLabel.textContent = distanceLabel(ft);
+  el.presets.querySelectorAll("button").forEach(b=>{
+    b.classList.toggle("on", Math.abs(parseFloat(b.dataset.ft)-ft) < Math.max(0.02, ft*0.012));
+  });
+  el.mSrc.textContent=(S.srcEstimated?"≈ ":"")+fmtFtShort(S.srcFt);
+  el.mTgt.textContent=fmtFtShort(ft);
+  const mm=equivalentFocal(R.fm.geom, S.sizeLock?1:clamp(srcM()/tgtM(),0.002,50));
+  el.mFocal.textContent = mm ? ("≈ "+Math.round(mm)+" mm") : "— mm";
+  el.splitline.classList.toggle("hide", S.compare!=="split" || S.view3d>0);
+  if(S.compare==="split") el.splitline.style.left=(S.split*100)+"%";
+  el.segCompare.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.v===S.compare));
+  syncAdvanced();
+}
+
+function updateDebug(){
+  if(!S.debug) return;
+  const g=R.fm.geom;
+  el.dFps.textContent=R.fps.toFixed(0);
+  el.dFrame.textContent=R.frameMs.toFixed(1)+" ms";
+  el.dTfps.textContent=R.trackerFps.toFixed(0)+" hz · "+R.trackerMs.toFixed(1)+" ms";
+  el.dLm.textContent=R.fm.hasDisp?String(NLM):"0";
+  el.dConf.textContent=(R.detected?"tracking":"lost")+" · "+R.faces.length+" face"+(R.faces.length===1?"":"s");
+  el.dTri.textContent=R.ren?String(R.ren.triCount):"0";
+  el.dGl.textContent=R.ren&&R.ren.ok?(R.ren.isGL2?"WebGL2 ok":"WebGL1 ok"):"unavailable";
+  el.dSrc.textContent=fmtFtShort(S.srcFt)+" ("+srcM().toFixed(2)+" m)";
+  el.dTgt.textContent=fmtFtShort(S.tgtFt)+" ("+tgtM().toFixed(2)+" m)";
+  el.dRatio.textContent=(tgtM()/srcM()).toFixed(3)+"×";
+  el.dFocal.textContent=(S.sizeLock?(tgtM()/srcM()):1).toFixed(3)+"×";
+  el.dFw.textContent=g?(g.faceFracW*100).toFixed(1)+"% w":"—";
+  el.dNose.textContent=g?(g.noseDepth*1000).toFixed(1)+" mm":"—";
+  el.dYaw.textContent=g?g.yaw.toFixed(1)+"°":"—";
+  el.dPitch.textContent=g?g.pitch.toFixed(1)+"°":"—";
+  el.dRoll.textContent=g?g.roll.toFixed(1)+"°":"—";
+}
+
+/* ============================================================================
+   VIEW TRANSFORM (framing / alignment)
+   ========================================================================== */
+/** vertical bias (in view heights) that centres the face in the *visible* area,
+    i.e. between the top bar and the control panel */
+function freeAreaBias(){
+  const vh=el.view.clientHeight||1;
+  const top=el.topbar.classList.contains("hide")?0:el.topbar.offsetHeight;
+  const bot=el.panel.classList.contains("hide")?0:el.panel.offsetHeight;
+  const f=(top + Math.max(vh-bot, top))/(2*vh);
+  return 0.5-f;                     // >0 => move the face up on screen
+}
+function computeView(geom, dt){
+  const cw=R.canvas.width, ch=R.canvas.height, ca=cw/ch, A=R.aspect;
+  const coverZ=Math.max(1, ca/A);
+  let z=coverZ, cx=0, cy=0, rot=0;
+
+  if(geom && S.align){
+    rot = -geom.roll*Math.PI/180;
+    z = clamp(0.17/Math.max(geom.eyeDist,1e-3), coverZ*0.9, 9);
+    cx=(geom.eyeL[0]+geom.eyeR[0])/2;
+    cy=(geom.eyeL[1]+geom.eyeR[1])/2 + (freeAreaBias()+0.04)/z;
+  }else if(geom && S.source==="photo"){
+    /* photos: show the whole frame, and zoom in only when the face is small */
+    const containZ=Math.min(1, ca/A);
+    const faceH=Math.max(geom.faceWidthUnit*1.55, 1e-3);
+    const visible=Math.max(0.35, 1-2*Math.abs(freeAreaBias()));   // usable height fraction
+    z = clamp(Math.min(0.62*visible/faceH, containZ*3.5), containZ, 6);
+    cx=geom.center[0]; cy=geom.center[1]+freeAreaBias()/z;
+  }else if(S.source==="photo"){
+    z=Math.min(1, ca/A);
+  }
+  {
+    const limX=Math.max(0, A/2 - ca/(2*z)), limY=Math.max(0, 0.5 - 1/(2*z));
+    cx=clamp(cx,-limX,limX); cy=clamp(cy,-limY,limY);
+  }
+  R.view={z,cx,cy,rot};
+  const v=R.viewSm;
+  if(!R.viewInit){ v.z=z; v.cx=cx; v.cy=cy; v.rot=rot; R.viewInit=true; }
+  else{
+    const a=1-Math.pow(0.001, clamp(dt,0,0.1));      // ~critically smooth follow
+    const k=S.align?a*0.9:a;
+    v.z+=(z-v.z)*k; v.cx+=(cx-v.cx)*k; v.cy+=(cy-v.cy)*k; v.rot+=(rot-v.rot)*k;
+  }
+}
+function invMatrix(out){
+  const ca=R.canvas.width/R.canvas.height, z=R.viewSm.z, th=R.viewSm.rot, s=S.mirror?-1:1;
+  const k1=ca*s/(2*z), k2=-1/(2*z), c=Math.cos(th), sn=Math.sin(th);
+  out[0]=c*k1; out[1]=-sn*k1; out[2]=sn*k2; out[3]=c*k2;
+  return out;
+}
+function imgToClip(u,v,out){
+  const ca=R.canvas.width/R.canvas.height, z=R.viewSm.z, th=R.viewSm.rot, s=S.mirror?-1:1;
+  const ex=u-R.viewSm.cx, ey=v-R.viewSm.cy, c=Math.cos(th), sn=Math.sin(th);
+  const px=c*ex-sn*ey, py=sn*ex+c*ey;
+  out[0]=s*px*2*z/ca; out[1]=-py*2*z;
+  return out;
+}
+
+/* ============================================================================
+   RENDER LOOP
+   ========================================================================== */
+const _inv=new Float32Array(4), _tmp=[0,0];
+let _lineXY=null,_lineV=null,_ptXY=null,_ptV=null;
+const _mx=new Float64Array(NV), _my=new Float64Array(NV);
+
+function presenceFade(now){
+  if(S.source==="photo") return R.fm.hasDisp?1:0;
+  if(!R.fm.hasDisp) return 0;
+  const since=now-R.lastSeen;
+  if(since<1200) return 1;
+  return clamp(1-(since-1200)/700,0,1);
+}
+
+function renderFrame(now, dt){
+  const ren=R.ren; if(!ren||!ren.ok) return;
+  if(R.canvas.width<2||R.canvas.height<2) return;
+  if(!R.srcW){ const gl=ren.gl; gl.viewport(0,0,R.canvas.width,R.canvas.height); gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT); return; }
+
+  R.fm.advance(1-Math.pow(0.0015, clamp(dt,0,0.1)));
+  const fade=presenceFade(now);
+  const Ds=srcM(), Dt=tgtM();
+  const useScan = S.useScan && !S.scanning && R.scan && R.scan.model;
+  const geom = R.fm.hasDisp ? R.fm.build(R.aspect,{depthScale:S.depthScale,Ds,Dt,scan:useScan?R.scan:null}) : null;
+  if(S.scanning && geom && R.detected) scanTick(geom);
+  computeView(geom, dt);
+
+  if(S.view3d && geom){ drawModelView(geom, dt); return; }
+  if(geom){
+    const sig=0.17*S.blend*Math.max(geom.faceWidthUnit,0.02);
+    ren.buildField(R.fm.verts, R.fm.depths, R.fm.tris, sig/R.aspect, sig);
+  }
+  const globalScale = S.sizeLock ? 1 : clamp(Ds/Dt, 0.0015, 60);
+  ren.drawWarp({
+    inv:invMatrix(_inv), viewC:[R.viewSm.cx,R.viewSm.cy],
+    center: geom?geom.center:[0,0], aspect:R.aspect,
+    Ds, Dt,
+    strength: geom? S.strength*fade : 0,
+    depthScale:S.depthScale,
+    dRange: geom?geom.dRange:0.05,
+    norm: geom?geom.norm:1,
+    globalScale,
+    split: S.split*2-1,
+    mode: S.compare==="orig"?1:(S.compare==="split"?2:0),
+    hold: S.holding?1:0
+  });
+  if(S.showMesh && geom && fade>0.01){
+    const shown = (S.holding || S.compare==="orig") ? 0 : S.strength*fade;
+    drawMeshOverlay(geom, (S.holding||S.compare==="orig")?1:globalScale, shown);
+  }
+  if(S.source==="photo" && R.faces.length>1) positionFacePicks();
+}
+
+function drawMeshOverlay(geom, globalScale, strength){
+  const fm=R.fm, tris=fm.tris; if(!tris) return;
+  const nl=tris.length*2;
+  if(!_lineXY||_lineXY.length<nl*2){ _lineXY=new Float32Array(nl*2); _lineV=new Float32Array(nl); }
+  if(!_ptXY){ _ptXY=new Float32Array(NV*2); _ptV=new Float32Array(NV); }
+  const cx=geom.center[0], cy=geom.center[1];
+  const dmaxP=Math.min(geom.dRange*3, 0.45*Math.min(srcM(),tgtM()));
+  const wOf=(i)=> i<NLM?1:(i<NLM+FACE_OVAL.length?0.85:0.5);
+  const X=_mx, Y=_my;
+  for(let i=0;i<NV;i++){
+    const d=clamp(fm.D[i]*S.depthScale,-0.30,dmaxP);
+    const m=clamp(calcMagnification(d,srcM(),tgtM())*geom.norm,0.45,2.2);
+    const g=(1+wOf(i)*strength*(m-1))*globalScale;
+    imgToClip(cx+(fm.U[i]-cx)*g, cy+(fm.V[i]-cy)*g, _tmp);
+    X[i]=_tmp[0]; Y[i]=_tmp[1];
+    _ptXY[i*2]=_tmp[0]; _ptXY[i*2+1]=_tmp[1];
+    _ptV[i]=clamp(0.5+0.5*(fm.D[i]/geom.dRange),0,1);
+  }
+  let k=0;
+  for(let t=0;t<tris.length;t+=3){
+    const a=tris[t],b=tris[t+1],c=tris[t+2];
+    const pairs=[a,b,b,c,c,a];
+    for(let e=0;e<6;e+=2){
+      const i=pairs[e], j=pairs[e+1];
+      _lineXY[k*2]=X[i]; _lineXY[k*2+1]=Y[i]; _lineV[k]=_ptV[i]; k++;
+      _lineXY[k*2]=X[j]; _lineXY[k*2+1]=Y[j]; _lineV[k]=_ptV[j]; k++;
+    }
+  }
+  R.ren.drawOverlay(_lineXY,_lineV,k,_ptXY,_ptV,NV);
+}
+
+/* ---------------------------------------------------------------------------
+   3D MODEL VIEW — renders the reconstructed facial surface itself so the
+   geometry driving the perspective simulation can be inspected directly.
+   ------------------------------------------------------------------------- */
+const M3 = {pos:null, uv:null, nrm:null, idx:null, srcTris:null, dirty:false};
+function buildModelArrays(geom){
+  const fm=R.fm, A=R.aspect, kM=geom.kMeters||1;
+
+  if(!M3.pos){ M3.pos=new Float32Array(NLM*3); M3.uv=new Float32Array(NLM*2); M3.nrm=new Float32Array(NLM*3); }
+  const cx=geom.center[0], cy=geom.center[1];
+  for(let i=0;i<NLM;i++){
+    M3.pos[i*3]  = fm.U[i]-cx;
+    M3.pos[i*3+1]= fm.V[i]-cy;
+    M3.pos[i*3+2]= fm.D[i]/kM;            // unit-space depth, + = toward viewer
+    M3.uv[i*2]   = fm.U[i]/A+0.5;
+    M3.uv[i*2+1] = fm.V[i]+0.5;
+  }
+  /* index list: face landmarks only, clipped to the face oval so the model has
+     a clean silhouette instead of the triangulation's convex hull */
+  const inOval=(x,y)=>{
+    let inside=false;
+    for(let i=0,j=FACE_OVAL.length-1;i<FACE_OVAL.length;j=i++){
+      const a=FACE_OVAL[i], b=FACE_OVAL[j];
+      const yi=fm.V[a], yj=fm.V[b], xi=fm.U[a], xj=fm.U[b];
+      if((yi>y)!==(yj>y) && x < (xj-xi)*(y-yi)/(yj-yi)+xi) inside=!inside;
+    }
+    return inside;
+  };
+  if(M3.srcTris!==fm.tris || M3.dirty){
+    M3.srcTris=fm.tris; M3.dirty=false;
+    const keep=[];
+    for(let t=0;t<fm.tris.length;t+=3){
+      const a=fm.tris[t],b=fm.tris[t+1],c=fm.tris[t+2];
+      if(a>=NLM||b>=NLM||c>=NLM) continue;
+      const mx=(fm.U[a]+fm.U[b]+fm.U[c])/3, my=(fm.V[a]+fm.V[b]+fm.V[c])/3;
+      if(inOval(mx,my)) keep.push(a,b,c);
+    }
+    M3.idx=new Uint16Array(keep);
+  }
+  /* Landmark depth is noisier than landmark position, and near the silhouette
+     the surface is almost edge-on, which turns that noise into a visible
+     sawtooth. Two light Laplacian passes over the mesh neighbourhood fix it
+     without moving the overall shape. (Display only — the warp uses the
+     separately blurred depth field.) */
+  {
+    const P=M3.pos, I=M3.idx;
+    const sum=M3.sum||(M3.sum=new Float32Array(NLM));
+    const cnt=M3.cnt||(M3.cnt=new Uint16Array(NLM));
+    for(let pass=0; pass<2; pass++){
+      sum.fill(0); cnt.fill(0);
+      for(let t=0;t<I.length;t+=3){
+        for(let e=0;e<3;e++){
+          const i=I[t+e], j=I[t+(e+1)%3];
+          sum[i]+=P[j*3+2]; cnt[i]++;
+          sum[j]+=P[i*3+2]; cnt[j]++;
+        }
+      }
+      for(let i=0;i<NLM;i++) if(cnt[i]) P[i*3+2]=0.55*P[i*3+2]+0.45*(sum[i]/cnt[i]);
+    }
+  }
+  M3.nrm.fill(0);
+  const P=M3.pos, N=M3.nrm, I=M3.idx;
+  for(let t=0;t<I.length;t+=3){
+    const a=I[t]*3,b=I[t+1]*3,c=I[t+2]*3;
+    const ux=P[b]-P[a], uy=P[b+1]-P[a+1], uz=P[b+2]-P[a+2];
+    const vx=P[c]-P[a], vy=P[c+1]-P[a+1], vz=P[c+2]-P[a+2];
+    const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+    N[a]+=nx;N[a+1]+=ny;N[a+2]+=nz; N[b]+=nx;N[b+1]+=ny;N[b+2]+=nz; N[c]+=nx;N[c+1]+=ny;N[c+2]+=nz;
+  }
+  for(let i=0;i<NLM;i++){
+    const l=Math.hypot(N[i*3],N[i*3+1],N[i*3+2])||1;
+    N[i*3]/=l; N[i*3+1]/=l; N[i*3+2]/=l;
+  }
+}
+function drawModelView(geom, dt){
+  buildModelArrays(geom);
+  if(S.spin3d){ S.spinT+=dt; S.yaw3d=Math.sin(S.spinT*0.55)*0.52; S.pitch3d=Math.sin(S.spinT*0.31)*0.10; }
+  const cy=Math.cos(S.yaw3d), sy=Math.sin(S.yaw3d), cp=Math.cos(S.pitch3d), sp=Math.sin(S.pitch3d);
+  const rot=new Float32Array([ cy,0,-sy,  sy*sp,cp,cy*sp,  sy*cp,-sp,cy*cp ]);
+  const ca=R.canvas.width/R.canvas.height;
+  const zoom=0.72/Math.max(geom.faceWidthUnit*1.6, 1e-3);
+  R.ren.drawModel(M3.pos,M3.uv,M3.nrm,M3.idx,{
+    rot, scaleX:2*zoom/ca*(S.mirror?-1:1), scaleY:2*zoom, persp:1.1,
+    mode:S.view3d===2?1:0, offY:freeAreaBias()*2
+  });
+}
+function set3d(v){
+  S.view3d=v;
+  el.facepicks.classList.toggle("hide", v>0);
+  el.btn3d.classList.toggle("on", v>0);
+  el.hint3d.classList.toggle("hide", v===0);
+  el.hint3d.textContent = v===2 ? "3D MODEL · SHADED · DRAG TO ROTATE" : "3D MODEL · DRAG TO ROTATE";
+  if(v>0){ S.spin3d=true; S.spinT=0; }
+  el.splitline.classList.toggle("hide", v>0 || S.compare!=="split");
+}
+function loop(now){
+  requestAnimationFrame(loop);
+  const dt=R.lastFrame?clamp((now-R.lastFrame)/1000,1/1000,0.25):1/60;
+  R.lastFrame=now;
+  R.fps += (1/dt - R.fps)*0.08;
+  const t0=performance.now();
+  resizeCanvas();
+  if(S.source==="camera") stepCamera(now);
+  renderFrame(now, dt);
+  R.frameMs += (performance.now()-t0 - R.frameMs)*0.08;
+  if(now-lastUIat>100){
+    lastUIat=now; updateUI(); updateDebug(); updateTrackStatus(now);
+    if(S.scanning) updateScanUI();
+  }
+}
+
+function updateTrackStatus(now){
+  if(S.source!=="camera"||!R.modelReady) return;
+  if(R.detected){
+    if(!R.wasDetected){
+      setStatus("Face locked","ok",1500); R.wasDetected=true;
+      if(!R.autoSrcDone){ R.autoSrcDone=true; setTimeout(()=>{ if(R.detected) autoSourceDistance(null); }, 700); }
+    }
+  }else{
+    const since=now-R.lastSeen;
+    if(R.wasDetected && since>900){ setStatus("Face lost","err"); R.wasDetected=false; }
+    else if(!R.wasDetected && !R.fm.hasDisp) setStatus("Finding face…","load");
+  }
+}
+
+function resizeCanvas(){
+  const dpr=Math.min(window.devicePixelRatio||1, 2);
+  const w=Math.max(2,Math.round(el.view.clientWidth*dpr)), h=Math.max(2,Math.round(el.view.clientHeight*dpr));
+  if(el.view.width!==w||el.view.height!==h){ el.view.width=w; el.view.height=h; }
+}
+
+/* ============================================================================
+   SOURCES — camera & photo
+   ========================================================================== */
+async function ensureModel(){
+  if(R.modelReady) return true;
+  setStatus("Loading face model…","load");
+  try{
+    await R.tr.load(t=>setStatus(t,"load"));
+    R.modelReady=true;
+    setStatus("Finding face…","load");
+    return true;
+  }catch(e){
+    console.error(e);
+    const offline = (location.protocol==="file:")
+      ? "The face model is downloaded once from a public CDN. Opening the file directly from disk can block that in some browsers — try Chrome, or serve the folder locally (python3 -m http.server) and open it over http://localhost."
+      : "The facial landmark model could not be downloaded. Check your internet connection — the model is fetched once from a public CDN — and try again.";
+    showError("Face model unavailable",
+      offline+" Everything else still works: the image is shown unmodified.",
+      {retry:true, upload:true, onRetry:()=>{ hideError(); ensureModel().then(r=>{ if(r && S.source==="photo") detectPhoto(); }); }});
+    setStatus("Face model unavailable","err",4000);
+    return false;
+  }
+}
+
+async function startCamera(deviceId){
+  hideError();
+  enterApp("camera");
+  stopStream();
+  setStatus("Starting camera…","load");
+  const tryGet=async(constraints)=>navigator.mediaDevices.getUserMedia(constraints);
+  const base = deviceId ? {deviceId:{exact:deviceId}} : {facingMode:{ideal:"user"}};
+  let stream=null, err=null;
+  for(const size of [{width:{ideal:1920},height:{ideal:1080}},{width:{ideal:1280},height:{ideal:720}},{}]){
+    try{ stream=await tryGet({video:Object.assign({},base,size), audio:false}); break; }
+    catch(e){ err=e; if(e && (e.name==="NotAllowedError"||e.name==="SecurityError")) break; }
+  }
+  if(!stream){
+    const n=err?err.name:"";
+    let title="Camera unavailable", msg="The camera could not be started.";
+    if(n==="NotAllowedError"||n==="SecurityError"){ title="Camera permission denied"; msg="Allow camera access in your browser (the padlock icon in the address bar), then try again. Nothing ever leaves your device."; }
+    else if(n==="NotFoundError"||n==="OverconstrainedError"||n==="DevicesNotFoundError"){ title="No camera found"; msg="No usable camera was detected on this device. You can upload a photo instead."; }
+    else if(n==="NotReadableError"){ title="Camera unavailable"; msg="Another application appears to be using the camera. Close it and try again."; }
+    else if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+      title="Camera unavailable";
+      msg = location.protocol==="file:"
+        ? "Browsers only allow camera access from a secure page. Open this file in Chrome, or serve the folder locally (python3 -m http.server) and load it over http://localhost — or just upload a photo."
+        : "This browser does not expose camera access. Try Chrome, Edge, Firefox or Safari — or upload a photo.";
+    }
+    showError(title,msg,{retry:true,upload:true,onRetry:()=>startCamera(S.deviceId)});
+    setStatus("Camera unavailable","err",3000);
+    return false;
+  }
+  R.stream=stream;
+  clearFacePicks();
+  const v=el.video;
+  v.srcObject=stream; v.muted=true; v.playsInline=true;
+  try{ await v.play(); }catch(e){}
+  await new Promise(res=>{
+    if(v.videoWidth) return res();
+    v.onloadedmetadata=()=>res();
+    setTimeout(res,3000);
+  });
+  R.video=v; R.image=null; R.srcW=v.videoWidth||1280; R.srcH=v.videoHeight||720;
+  R.aspect=R.srcW/R.srcH; R.lastVideoTime=-1; R.viewInit=false;
+  S.source="camera"; R.fm.reset(); R.faces=[]; R.wasDetected=false; R.autoSrcDone=false;
+  const track=stream.getVideoTracks()[0];
+  S.deviceId = track && track.getSettings ? (track.getSettings().deviceId||null) : null;
+  listCameras();
+  const ok=await ensureModel();
+  if(ok){ await R.tr.setMode("VIDEO"); setStatus("Finding face…","load"); }
+  updateUI();
+  return true;
+}
+function stopStream(){
+  if(R.stream){ R.stream.getTracks().forEach(t=>{try{t.stop();}catch(e){}}); R.stream=null; }
+}
+async function listCameras(){
+  try{
+    const devs=await navigator.mediaDevices.enumerateDevices();
+    R.devices=devs.filter(d=>d.kind==="videoinput");
+    if(UI.camSel){
+      UI.camSel.innerHTML="";
+      R.devices.forEach((d,i)=>{
+        const o=document.createElement("option");
+        o.value=d.deviceId; o.textContent=d.label||("Camera "+(i+1));
+        UI.camSel.appendChild(o);
+      });
+      if(S.deviceId) UI.camSel.value=S.deviceId;
+    }
+    syncAdvanced();
+  }catch(e){}
+}
+
+function makePhotoCanvas(src, w, h){
+  const max=2048;
+  const sc=Math.min(1, max/Math.max(w,h));
+  const c=document.createElement("canvas");
+  c.width=Math.max(2,Math.round(w*sc)); c.height=Math.max(2,Math.round(h*sc));
+  const ctx=c.getContext("2d");
+  ctx.drawImage(src,0,0,c.width,c.height);
+  return c;
+}
+async function loadPhoto(file){
+  hideError();
+  if(!file){ return; }
+  if(file.type && !/^image\//.test(file.type)){
+    showError("Unsupported file","Please choose a JPG, PNG or WebP image.",{close:true,upload:true});
+    return;
+  }
+  enterApp("photo");
+  setStatus("Loading photo…","load");
+  let bmp=null, w=0, h=0;
+  try{
+    if(window.createImageBitmap){
+      bmp=await createImageBitmap(file,{imageOrientation:"from-image"});
+      w=bmp.width; h=bmp.height;
+    }
+  }catch(e){ bmp=null; }
+  if(!bmp){
+    const url=URL.createObjectURL(file);
+    try{
+      const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=()=>rej(new Error("decode")); i.src=url; });
+      bmp=img; w=img.naturalWidth; h=img.naturalHeight;
+    }catch(e){
+      URL.revokeObjectURL(url);
+      showError("Image could not be read","That file could not be decoded as an image. Try a different JPG, PNG or WebP.",{close:true,upload:true});
+      setStatus("",null); return;
+    }
+    URL.revokeObjectURL(url);
+  }
+  if(!w||!h){ showError("Image could not be read","The image has no readable dimensions.",{close:true,upload:true}); return; }
+  let f35=null;
+  try{ f35=readExifFocal35(await file.arrayBuffer()); }catch(e){}
+  await usePhotoSource(makePhotoCanvas(bmp,w,h), f35);
+  if(bmp.close) try{bmp.close();}catch(e){}
+}
+async function usePhotoSource(canvas, f35){
+  if(!R.ren||!R.ren.ok){
+    showError("WebGL unavailable",
+      "The perspective renderer could not start, so images cannot be displayed. Reload the page, or try a browser with hardware acceleration enabled.",
+      {retry:true, onRetry:()=>location.reload()});
+    return;
+  }
+  stopStream();
+  R.image=canvas; R.video=null;
+  R.srcW=canvas.width; R.srcH=canvas.height; R.aspect=R.srcW/R.srcH;
+  S.source="photo"; R.fm.reset(); R.faces=[]; S.faceIdx=0; R.viewInit=false; R.wasDetected=false;
+  clearFacePicks(); R.warnToken=(R.warnToken||0)+1;
+  R.ren.uploadSource(canvas, canvas.width, canvas.height);
+  S.mirror=false; el.btnMirror.classList.remove("on");
+  updateUI();
+  const ok=await ensureModel();
+  if(ok) await detectPhoto(f35);
+}
+async function detectPhoto(f35){
+  if(!R.image) return;
+  setStatus("Finding face…","load");
+  await R.tr.setMode("IMAGE");
+  const t0=performance.now();
+  const res=R.tr.detectImage(R.image);
+  R.trackerMs=performance.now()-t0;
+  clearFacePicks();
+  if(res && res.faceLandmarks && res.faceLandmarks.length){
+    R.faces=res.faceLandmarks;
+    S.faceIdx=0;
+    if(R.faces.length>1){
+      buildFacePicks();
+      setStatus(R.faces.length+" faces found — tap one to simulate","ok",4000);
+    }else setStatus("Face locked","ok",1600);
+    R.fm.reset();
+    R.fm.ingest(R.faces[0], 1/30, 0);
+    R.fm.advance(1);
+    R.detected=true; R.lastSeen=performance.now(); R.wasDetected=true;
+    R.fm.build(R.aspect,{depthScale:S.depthScale,Ds:srcM(),Dt:tgtM(),scan:null});
+    autoSourceDistance(f35);
+    const lm=R.faces[S.faceIdx];
+    let mnx=1,mny=1,mxx=0,mxy=0;
+    for(const q of lm){ if(q.x<mnx)mnx=q.x; if(q.x>mxx)mxx=q.x; if(q.y<mny)mny=q.y; if(q.y>mxy)mxy=q.y; }
+    const tok=R.warnToken||0;
+    if(mnx<-0.01||mxx>1.01||mny<-0.01||mxy>1.01)
+      setTimeout(()=>{ if((R.warnToken||0)===tok) setStatus("Face is cut off at the frame edge — results will be approximate","err",4500); },3400);
+    else if(mxx-mnx<0.09)
+      setTimeout(()=>{ if((R.warnToken||0)===tok) setStatus("Face is small in frame — use a closer photo for best accuracy","err",4500); },3400);
+  }else{
+    R.faces=[]; R.detected=false;
+    setStatus("No face detected","err",3500);
+    showError("No face detected",
+      "No face could be found in this photo. Use a clearer, front-facing photo where the face is reasonably large in the frame.",
+      {close:true, upload:true});
+  }
+  updateUI();
+}
+/** pick a sensible SOURCE distance automatically, always flagged as an estimate */
+function autoSourceDistance(f35){
+  const wasSame = Math.abs(S.tgtFt-S.srcFt)<1e-6;
+  let d = f35 ? distanceFromExif(f35) : null;
+  const how = d ? "camera EXIF" : "face size";
+  if(!d) d = estimateSourceDistance();
+  if(!d) return;
+  S.srcFt = clamp(d/FT, 0.8, 25);
+  S.srcEstimated = true;
+  if(wasSame) S.tgtFt = S.srcFt;
+  syncSlider(); updateUI();
+  setStatus("Source distance ≈ "+fmtFtShort(S.srcFt)+" (from "+how+")","ok",3200);
+}
+function clearFacePicks(){ el.facepicks.innerHTML=""; R.pickEls=[]; }
+function buildFacePicks(){
+  clearFacePicks(); R.pickEls=[];
+  R.faces.forEach((f,i)=>{
+    const d=document.createElement("div");
+    d.className="facepick"+(i===S.faceIdx?" on":"");
+    d.innerHTML='<span>FACE '+(i+1)+'</span>';
+    d.addEventListener("click",()=>{
+      S.faceIdx=i;
+      R.fm.reset(); R.fm.ingest(R.faces[i],1/30,0); R.fm.advance(1);
+      R.pickEls.forEach((p,j)=>p.classList.toggle("on",j===i));
+    });
+    el.facepicks.appendChild(d); R.pickEls.push(d);
+  });
+}
+function positionFacePicks(){
+  if(!R.pickEls||!R.pickEls.length) return;
+  const W=el.view.clientWidth, H=el.view.clientHeight, A=R.aspect;
+  R.faces.forEach((f,i)=>{
+    let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+    for(let k=0;k<f.length;k+=4){
+      const u=(f[k].x-0.5)*A, v=f[k].y-0.5;
+      imgToClip(u,v,_tmp);
+      const sx=(_tmp[0]*0.5+0.5)*W, sy=(0.5-_tmp[1]*0.5)*H;
+      if(sx<minx)minx=sx; if(sx>maxx)maxx=sx; if(sy<miny)miny=sy; if(sy>maxy)maxy=sy;
+    }
+    const p=R.pickEls[i];
+    p.style.left=(minx-8)+"px"; p.style.top=(miny-8)+"px";
+    p.style.width=(maxx-minx+16)+"px"; p.style.height=(maxy-miny+16)+"px";
+  });
+}
+
+function stepCamera(now){
+  const v=R.video; if(!v||v.readyState<2) return;
+  if(v.videoWidth && (R.srcW!==v.videoWidth||R.srcH!==v.videoHeight)){
+    R.srcW=v.videoWidth; R.srcH=v.videoHeight; R.aspect=R.srcW/R.srcH;
+  }
+  if(v.currentTime!==R.lastVideoTime){
+    R.lastVideoTime=v.currentTime;
+    R.ren.uploadSource(v, R.srcW, R.srcH);
+  }
+  if(!R.modelReady || R.tr.mode!=="VIDEO") return;
+  if(now-R.lastDetect < 1000/TRACK_HZ) return;
+  const dt=(now-R.lastDetect)/1000;
+  const t0=performance.now();
+  const res=R.tr.detectVideo(v, now);
+  R.trackerMs += (performance.now()-t0 - R.trackerMs)*0.15;
+  R.trackerFps += (1/Math.max(dt,0.001) - R.trackerFps)*0.15;
+  R.lastDetect=now;
+  if(res && res.faceLandmarks && res.faceLandmarks.length){
+    R.faces=res.faceLandmarks;
+    if(S.faceIdx>=R.faces.length) S.faceIdx=0;
+    const ok=R.fm.ingest(R.faces[S.faceIdx], R.fm.hasDisp?clamp(dt,0.01,0.2):1/30, S.smoothing);
+    R.detected=!!ok; if(ok) R.lastSeen=now;
+  }else{
+    R.detected=false;
+  }
+}
+
+/* ============================================================================
+   3D SCAN CONTROLLER
+   ========================================================================== */
+function buildScanDots(){
+  el.scanDots.innerHTML="";
+  for(let i=0;i<SCAN_BINS;i++){
+    const d=document.createElement("i");
+    if(i===((SCAN_BINS-1)>>1)) d.className="mid";
+    el.scanDots.appendChild(d);
+  }
+}
+function startScan(){
+  if(S.source!=="camera"){ setStatus("3D scan needs the live camera","err",2600); return; }
+  if(!R.modelReady){ setStatus("Face model still loading…","load",2000); return; }
+  R.scan.reset();
+  S.scanning=true; R.lastScanAt=0;
+  el.scanui.classList.remove("hide");
+  el.scanDone.classList.add("hide");
+  el.scanCancel.textContent="Cancel";
+  el.scanSub.textContent="Turning your head lets the app measure your real facial depth from several angles instead of estimating it from one frame.";
+  el.btnScan.classList.add("on");
+  updateScanUI();
+}
+function cancelScan(){
+  S.scanning=false;
+  el.scanui.classList.add("hide");
+  el.btnScan.classList.toggle("on", !!(R.scan&&R.scan.model&&S.useScan));
+}
+function scanTick(geom){
+  const now=performance.now();
+  if(now-R.lastScanAt<110) return;
+  R.lastScanAt=now;
+  const P=R.scanBuf||(R.scanBuf=new Float32Array(NLM*3));
+  const Z=R.fm.rawZ||R.fm._Z;
+  for(let i=0;i<NLM;i++){ P[i*3]=R.fm.U[i]; P[i*3+1]=R.fm.V[i]; P[i*3+2]=Z[i]; }
+  R.scan.addFrame(P, geom.yaw, geom.pitch);
+  const c=R.scan.coverage();
+  updateScanUI(c);
+  if(c.done) finishScan();
+}
+function updateScanUI(c){
+  c=c||R.scan.coverage();
+  const dots=el.scanDots.children;
+  if(dots.length!==SCAN_BINS) buildScanDots();
+  for(let i=0;i<SCAN_BINS;i++) el.scanDots.children[i].classList.toggle("on", R.scan.bins[i]>0);
+  el.scanBar.style.width=Math.round(c.progress*100)+"%";
+  let t;
+  if(!R.detected) t="Bring your face into view";
+  else if(!c.centre) t="Look straight at the camera";
+  else if(!c.left||!c.right) t="Now slowly turn your head to one side";
+  else if(c.span<28) t="Good — now turn slowly the other way";
+  else t="Almost done — keep turning slowly";
+  if(el.scanInstr.textContent!==t) el.scanInstr.textContent=t;
+}
+function finishScan(){
+  S.scanning=false;
+  el.scanInstr.textContent="Building your 3D face…";
+  el.scanBar.style.width="100%";
+  setTimeout(()=>{
+    const ok=R.scan.solve();
+    if(ok){
+      S.useScan=true;
+      el.btnScan.classList.add("on");
+      el.scanInstr.textContent="3D scan complete";
+      el.scanSub.textContent="Depth accuracy "+Math.round(R.scan.quality*100)+"% · "+
+        Math.round(R.scan.span)+"° of head rotation captured · saved on this device.";
+      el.scanDone.classList.remove("hide");
+      el.scanCancel.textContent="Close";
+      setStatus("3D face scan complete","ok",2600);
+    }else{
+      el.scanInstr.textContent="Not enough coverage";
+      el.scanSub.textContent="Try again and turn your head further to each side.";
+      el.scanDone.classList.add("hide");
+    }
+    syncAdvanced();
+  },30);
+}
+
+/* ============================================================================
+   ACTIONS
+   ========================================================================== */
+function enterApp(kind){
+  if(!el.intro.classList.contains("gone")){
+    el.intro.classList.add("gone");
+    setTimeout(()=>el.intro.classList.add("hide"),520);
+  }
+  el.topbar.classList.remove("hide");
+  el.panel.classList.remove("hide");
+  el.btnSource.title = kind==="camera" ? "Use a photo instead" : "Use the camera instead";
+}
+function exportFrame(){
+  try{
+    renderFrame(performance.now(), 1/60);            // guarantee a fresh frame
+    el.view.toBlob(b=>{
+      if(!b){ setStatus("Could not export frame","err",2500); return; }
+      const a=document.createElement("a");
+      a.href=URL.createObjectURL(b);
+      const d=new Date(), pad=n=>String(n).padStart(2,"0");
+      a.download="face-perspective-"+fmtFtShort(S.tgtFt).replace(/[ ,]/g,"")+"-"+
+        d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+"-"+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds())+".png";
+      document.body.appendChild(a); a.click();
+      setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },1000);
+      setStatus("Frame saved","ok",1800);
+    },"image/png");
+  }catch(e){ setStatus("Could not export frame","err",2500); }
+}
+/** export the reconstructed facial surface as a Wavefront OBJ (+MTL + texture) */
+function exportModelOBJ(){
+  const geom=R.fm.geom;
+  if(!geom){ setStatus("No face to export","err",2200); return null; }
+  buildModelArrays(geom);
+  const P=M3.pos, UV=M3.uv, I=M3.idx, k=geom.kMeters||1;
+  const used=new Int32Array(NLM).fill(-1);
+  let vs="", vts="", fs="", n=0;
+  for(let t=0;t<I.length;t+=3){
+    for(let e=0;e<3;e++){
+      const i=I[t+e];
+      if(used[i]<0){
+        used[i]=++n;
+        /* metres, Y up, Z toward the viewer */
+        vs+="v "+(P[i*3]*k).toFixed(5)+" "+(-P[i*3+1]*k).toFixed(5)+" "+(P[i*3+2]*k).toFixed(5)+"\n";
+        vts+="vt "+UV[i*2].toFixed(5)+" "+(1-UV[i*2+1]).toFixed(5)+"\n";
+      }
+    }
+    const a=used[I[t]],b=used[I[t+1]],c=used[I[t+2]];
+    fs+="f "+a+"/"+a+" "+c+"/"+c+" "+b+"/"+b+"\n";
+  }
+  const obj="# Face Perspective Simulator — reconstructed facial surface\n"+
+            "# units: metres · "+n+" vertices · "+(I.length/3)+" triangles"+
+            (R.fm.usingScan?" · from personal 3D scan":" · single-frame depth estimate")+"\n"+
+            "mtllib face.mtl\no face\n"+vs+vts+"usemtl face\ns 1\n"+fs;
+  const mtl="newmtl face\nKa 1 1 1\nKd 1 1 1\nKs 0 0 0\nd 1\nillum 2\nmap_Kd face.jpg\n";
+  return {obj, mtl, verts:n, tris:I.length/3};
+}
+function downloadModel(){
+  const m=exportModelOBJ(); if(!m) return;
+  const src=R.image||R.video;
+  const c=document.createElement("canvas"); c.width=R.srcW; c.height=R.srcH;
+  c.getContext("2d").drawImage(src,0,0,c.width,c.height);
+  const save=(name,blob)=>{ const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=name;
+    document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500); };
+  save("face.obj", new Blob([m.obj],{type:"text/plain"}));
+  save("face.mtl", new Blob([m.mtl],{type:"text/plain"}));
+  c.toBlob(b=>{ if(b) save("face.jpg", b); }, "image/jpeg", 0.92);
+  setStatus("3D model exported ("+m.verts+" verts, "+m.tris+" tris)","ok",2600);
+}
+function resetAll(){
+  S.tgtFt=S.srcFt;
+  S.strength=1.0;
+  S.align=false;
+  S.compare="sim";
+  S.holding=false;
+  S.split=0.5;
+  el.btnAlign.classList.remove("on");
+  el.btnHold.classList.remove("active");
+  if(S.ctlMode==="focal"){ const mm=equivalentFocal(R.fm.geom,1); if(mm) S.focalMm=clamp(mm,14,300); }
+  syncSlider(); updateUI();
+  setStatus("Reset","ok",1200);
+}
+function toggleFullscreen(){
+  const d=document;
+  if(!d.fullscreenElement && !d.webkitFullscreenElement){
+    const e=d.documentElement;
+    (e.requestFullscreen||e.webkitRequestFullscreen||function(){}).call(e);
+  }else{
+    (d.exitFullscreen||d.webkitExitFullscreen||function(){}).call(d);
+  }
+}
+function setImmersive(v){
+  S.immersive=v;
+  document.body.classList.toggle("immersive",v);
+  if(v){ el.advanced.classList.remove("open"); el.advToggle.classList.remove("open"); }
+}
+
+/* ============================================================================
+   EVENT WIRING
+   ========================================================================== */
+function wire(){
+  el.introCam.addEventListener("click",()=>startCamera(null));
+  el.introUpload.addEventListener("click",()=>el.fileInput.click());
+  el.errUpload.addEventListener("click",()=>{ hideError(); el.fileInput.click(); });
+  el.errClose.addEventListener("click",hideError);
+  el.errRetry.addEventListener("click",()=>{ if(R.errRetry) R.errRetry(); else hideError(); });
+  el.fileInput.addEventListener("change",e=>{
+    const f=e.target.files&&e.target.files[0];
+    if(f) loadPhoto(f);
+    e.target.value="";
+  });
+
+  el.btnSource.addEventListener("click",()=>{
+    if(S.source==="camera") el.fileInput.click();
+    else startCamera(S.deviceId);
+  });
+  el.btnMirror.addEventListener("click",()=>{ S.mirror=!S.mirror; el.btnMirror.classList.toggle("on",S.mirror); syncAdvanced(); });
+  el.btnAlign.addEventListener("click",()=>{ S.align=!S.align; el.btnAlign.classList.toggle("on",S.align); syncAdvanced(); });
+  el.btnScan.addEventListener("click",()=>{
+    if(S.scanning){ cancelScan(); return; }
+    if(R.scan.model && S.source!=="camera"){ S.useScan=!S.useScan; el.btnScan.classList.toggle("on",S.useScan); syncAdvanced(); return; }
+    startScan();
+  });
+  el.scanCancel.addEventListener("click",cancelScan);
+  el.scanDone.addEventListener("click",cancelScan);
+  el.btn3d.addEventListener("click",()=>set3d((S.view3d+1)%3));
+  let rot3=null;
+  el.view.addEventListener("pointerdown",e=>{
+    if(!S.view3d) return;
+    rot3={x:e.clientX,y:e.clientY,yaw:S.yaw3d,pitch:S.pitch3d}; S.spin3d=false;
+    el.view.setPointerCapture&&el.view.setPointerCapture(e.pointerId);
+  });
+  window.addEventListener("pointermove",e=>{
+    if(!rot3) return;
+    S.yaw3d=clamp(rot3.yaw+(e.clientX-rot3.x)*0.006,-1.25,1.25);
+    S.pitch3d=clamp(rot3.pitch+(e.clientY-rot3.y)*0.005,-0.7,0.7);
+  });
+  window.addEventListener("pointerup",()=>{ if(rot3){ rot3=null; clearTimeout(R.spinTimer); R.spinTimer=setTimeout(()=>{S.spin3d=true;S.spinT=Math.asin(clamp(S.yaw3d/0.52,-1,1))/0.55;},2500);} });
+  el.btnMesh.addEventListener("click",()=>{ S.showMesh=!S.showMesh; el.btnMesh.classList.toggle("on",S.showMesh); syncAdvanced(); });
+  el.btnSave.addEventListener("click",exportFrame);
+  el.btnReset.addEventListener("click",resetAll);
+  el.btnFull.addEventListener("click",toggleFullscreen);
+
+  el.mainSlider.addEventListener("input",onSlider);
+  el.mainSlider.addEventListener("pointerdown",()=>setImmersive(false));
+
+  el.segCompare.addEventListener("click",e=>{
+    const b=e.target.closest("button[data-v]"); if(!b) return;
+    S.compare=b.dataset.v; updateUI();
+  });
+  const holdOn=e=>{ e.preventDefault(); S.holding=true; el.btnHold.classList.add("active"); };
+  const holdOff=()=>{ S.holding=false; el.btnHold.classList.remove("active"); };
+  el.btnHold.addEventListener("pointerdown",holdOn);
+  window.addEventListener("pointerup",holdOff);
+  window.addEventListener("pointercancel",holdOff);
+
+  el.advToggle.addEventListener("click",()=>{
+    const open=el.advanced.classList.toggle("open");
+    el.advToggle.classList.toggle("open",open);
+  });
+
+  /* split divider drag (grab the handle or drag anywhere in split mode) */
+  let dragging=false;
+  const setSplitFromX=x=>{
+    const r=el.view.getBoundingClientRect();
+    S.split=clamp((x-r.left)/r.width,0.02,0.98);
+    el.splitline.style.left=(S.split*100)+"%";
+  };
+  const startDrag=e=>{
+    if(S.compare!=="split" || S.view3d>0) return;
+    dragging=true; setSplitFromX(e.clientX);
+    e.preventDefault();
+  };
+  el.splitline.addEventListener("pointerdown",startDrag);
+  el.view.addEventListener("pointerdown",e=>{ if(S.compare==="split") startDrag(e); });
+  window.addEventListener("pointermove",e=>{ if(dragging) setSplitFromX(e.clientX); });
+  window.addEventListener("pointerup",()=>{ dragging=false; });
+
+  /* double tap / click on the image toggles immersive mode */
+  let lastTap=0;
+  el.view.addEventListener("pointerup",()=>{
+    const n=performance.now();
+    if(n-lastTap<320 && S.compare!=="split") setImmersive(!S.immersive);
+    lastTap=n;
+  });
+
+  /* drag & drop + paste */
+  let dragDepth=0;
+  window.addEventListener("dragover",e=>{ e.preventDefault(); });
+  window.addEventListener("dragenter",e=>{ e.preventDefault(); dragDepth++; el.dropzone.classList.remove("hide"); });
+  window.addEventListener("dragleave",()=>{ if(--dragDepth<=0){ dragDepth=0; el.dropzone.classList.add("hide"); } });
+  window.addEventListener("drop",e=>{
+    e.preventDefault(); dragDepth=0; el.dropzone.classList.add("hide");
+    const f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];
+    if(f) loadPhoto(f);
+  });
+  window.addEventListener("paste",e=>{
+    const items=e.clipboardData&&e.clipboardData.items; if(!items) return;
+    for(const it of items){ if(it.type&&it.type.indexOf("image")===0){ const f=it.getAsFile(); if(f){ loadPhoto(f); break; } } }
+  });
+
+  /* keyboard */
+  window.addEventListener("keydown",e=>{
+    const t=e.target;
+    if(t && (t.tagName==="INPUT"||t.tagName==="SELECT"||t.tagName==="TEXTAREA")){
+      if(!(e.key==="d"&&(e.metaKey||e.ctrlKey))) return;
+    }
+    const k=e.key.toLowerCase();
+    if((k==="d" && (e.ctrlKey||e.metaKey) && e.shiftKey) || (k==="d" && !e.ctrlKey && !e.metaKey && !e.altKey)){
+      S.debug=!S.debug; el.debug.classList.toggle("hide",!S.debug); e.preventDefault(); return;
+    }
+    if(k===" "){
+      const tn=t&&t.tagName;
+      if(tn==="BUTTON"||tn==="A"||tn==="SELECT"||tn==="INPUT") return;   // let it activate the control
+      S.holding=true; el.btnHold.classList.add("active"); e.preventDefault(); return;
+    }
+    if(k==="m"){ S.showMesh=!S.showMesh; el.btnMesh.classList.toggle("on",S.showMesh); syncAdvanced(); return; }
+    if(k==="f"){ toggleFullscreen(); return; }
+    if(k==="r"){ resetAll(); return; }
+    if(k==="s"){ exportFrame(); return; }
+    if(k==="v"){ set3d((S.view3d+1)%3); return; }
+    if(k==="c"){ S.compare = S.compare==="sim"?"orig":(S.compare==="orig"?"split":"sim"); updateUI(); return; }
+  });
+  window.addEventListener("keyup",e=>{ if(e.key===" "){ S.holding=false; el.btnHold.classList.remove("active"); } });
+
+  /* debug panel controls */
+  el.dvDepth.addEventListener("input",()=>{ S.depthScale=parseFloat(el.dvDepth.value); syncAdvanced(); });
+  el.dvFall.addEventListener("input",()=>{ S.blend=parseFloat(el.dvFall.value); syncAdvanced(); });
+  el.dvSmooth.addEventListener("input",()=>{ S.smoothing=parseFloat(el.dvSmooth.value); syncAdvanced(); });
+
+  const fsChange=()=>{
+    const on=!!(document.fullscreenElement||document.webkitFullscreenElement);
+    el.btnFull.classList.toggle("on",on);
+    setImmersive(on);
+  };
+  document.addEventListener("fullscreenchange",fsChange);
+  document.addEventListener("webkitfullscreenchange",fsChange);
+  window.addEventListener("orientationchange",()=>{ R.viewInit=false; });
+  document.addEventListener("gesturestart",e=>e.preventDefault());
+}
+
+/* ============================================================================
+   BOOT
+   ========================================================================== */
+function initializeApp(){
+  R.canvas=el.view;
+  R.scan=new FaceScan();
+  buildPresets();
+  buildScanDots();
+  buildAdvanced();
+  el.btnScan.classList.toggle("on", !!R.scan.model && S.useScan);
+  wire();                       // wire first, so error-card buttons always work
+  R.ren=new Renderer(el.view);
+  if(!R.ren.init()){
+    showError("WebGL unavailable",
+      "This browser could not create a WebGL context, which this app needs for the perspective rendering. Try a different browser, or enable hardware acceleration.",
+      {retry:true, onRetry:()=>location.reload()});
+    return;
+  }
+  syncSlider();
+  updateUI();
+  resizeCanvas();
+  requestAnimationFrame(loop);
+  /* warm the model up in the background so the first mode switch is fast */
+  setTimeout(()=>{ if(S.source==="none") R.tr.load().then(()=>{R.modelReady=true;}).catch(()=>{}); }, 400);
+}
+
+/* ============================================================================
+   SELF-TEST HARNESS (hidden; used for verification, not part of the UI)
+   ========================================================================== */
+function synthLandmarks(nose){
+  /* An analytic head: ellipsoid + nose bump. Produces MediaPipe-shaped
+     normalised landmarks so the whole pipeline can be exercised headlessly. */
+  const cx=0.5, cy=0.5, hw=0.17, hh=0.24, A=0.8;   // A = image aspect (w/h)
+  const pts=new Array(NLM);
+  const depth=(dx,dy)=>{                            // dx,dy in half-width units
+    const r=dx*dx+(dy*0.72)*(dy*0.72);
+    const zb=-0.80*Math.sqrt(Math.max(0,1-Math.min(r,1)))*hw;
+    const nb=-(nose===undefined?0.55:nose)*hw*Math.exp(-((dx*dx)+Math.pow((dy-0.16)*0.75,2))/0.055);
+    return zb+nb;
+  };
+  const put=(i,dx,dy,extra)=>{
+    pts[i]={x:cx+dx*hw, y:cy+dy*hh, z:depth(dx,dy*hh/hw)+(extra||0)};
+  };
+  for(let k=0;k<FACE_OVAL.length;k++){
+    const t=k/FACE_OVAL.length*Math.PI*2;
+    put(FACE_OVAL[k], Math.sin(t)*0.99, -Math.cos(t)*0.99);
+  }
+  put(IDX.noseTip,0,0.16); put(IDX.noseBridge,0,-0.10);
+  put(IDX.eyeLouter,-0.62,-0.16); put(IDX.eyeLinner,-0.22,-0.16);
+  put(IDX.eyeRinner,0.22,-0.16);  put(IDX.eyeRouter,0.62,-0.16);
+  put(IDX.irisL,-0.42,-0.16);     put(IDX.irisR,0.42,-0.16);
+  put(IDX.mouthL,-0.30,0.46);     put(IDX.mouthR,0.30,0.46);
+  put(IDX.upperLip,0,0.42);       put(IDX.lowerLip,0,0.50);
+  let n=0;
+  for(let i=0;i<NLM;i++){
+    if(pts[i]) continue;
+    /* fill the remaining indices over the face area (golden-angle spiral) */
+    const t=(n+0.5)/NLM, r=Math.sqrt(t)*0.95, a=n*2.39996;
+    put(i, r*Math.cos(a), r*Math.sin(a)*1.02);
+    n++;
+  }
+  return {pts, aspect:A};
+}
+function synthImage(w,h){
+  const c=document.createElement("canvas"); c.width=w; c.height=h;
+  const g=c.getContext("2d");
+  g.fillStyle="#101216"; g.fillRect(0,0,w,h);
+  const cx=w*0.5, cy=h*0.5, hw=w*0.17, hh=h*0.24;
+  const grd=g.createRadialGradient(cx-hw*0.3,cy-hh*0.3,hw*0.15,cx,cy,hw*1.6);
+  grd.addColorStop(0,"#e8c3a4"); grd.addColorStop(1,"#8d6a53");
+  g.save(); g.beginPath(); g.ellipse(cx,cy,hw,hh,0,0,Math.PI*2); g.clip();
+  g.fillStyle=grd; g.fillRect(0,0,w,h);
+  g.strokeStyle="rgba(0,0,0,.18)"; g.lineWidth=1;
+  for(let x=cx-hw;x<cx+hw;x+=10){ g.beginPath(); g.moveTo(x,cy-hh); g.lineTo(x,cy+hh); g.stroke(); }
+  for(let y=cy-hh;y<cy+hh;y+=10){ g.beginPath(); g.moveTo(cx-hw,y); g.lineTo(cx+hw,y); g.stroke(); }
+  g.restore();
+  g.fillStyle="#22262c";
+  g.beginPath(); g.ellipse(cx-hw*0.42,cy-hh*0.16,hw*0.14,hh*0.05,0,0,Math.PI*2); g.fill();
+  g.beginPath(); g.ellipse(cx+hw*0.42,cy-hh*0.16,hw*0.14,hh*0.05,0,0,Math.PI*2); g.fill();
+  g.strokeStyle="#5c3f31"; g.lineWidth=3;
+  g.beginPath(); g.moveTo(cx,cy-hh*0.10); g.lineTo(cx-hw*0.13,cy+hh*0.18); g.lineTo(cx+hw*0.13,cy+hh*0.18); g.stroke();
+  g.beginPath(); g.moveTo(cx-hw*0.30,cy+hh*0.45); g.quadraticCurveTo(cx,cy+hh*0.55,cx+hw*0.30,cy+hh*0.45); g.stroke();
+  return c;
+}
+/** CPU mirror of the shader's per-vertex magnification (w = 1 inside the face) */
+function probeFactor(idx, Ds, Dt, depthScale, norm, dRange){
+  const d=clamp(R.fm.D[idx]*depthScale, -0.30, Math.min(dRange*3, 0.45*Math.min(Ds,Dt)));
+  return clamp(calcMagnification(d,Ds,Dt)*norm, 0.45, 2.2);
+}
+const FPS = {
+  S,R,el,UI,
+  calcMagnification, sliderToFt, ftToSlider, delaunay, FaceModel, distanceLabel,
+  loadPhoto, similarityFit, jacobiTop4, FaceScan, startScan, cancelScan, set3d, M3,
+  exportModelOBJ, downloadModel, buildModelArrays,
+  async demo(nose){
+    const {pts,aspect}=synthLandmarks(nose);
+    const img=synthImage(Math.round(1000*aspect),1000);
+    enterApp("photo");
+    stopStream();
+    R.image=img; R.video=null; R.srcW=img.width; R.srcH=img.height; R.aspect=img.width/img.height;
+    S.source="photo"; S.mirror=false; R.viewInit=false; R.synthetic=true;
+    R.ren.uploadSource(img,img.width,img.height);
+    R.fm.reset(); R.fm.ingest(pts,1/30,0); R.fm.advance(1);
+    R.faces=[pts]; R.detected=true; R.lastSeen=performance.now(); R.wasDetected=true;
+    updateUI();
+    return true;
+  },
+  /** geometry probe: radial factors for nose / cheek-side / chin at a distance */
+  probe(srcFt,tgtFt,lock){
+    S.srcFt=srcFt; S.tgtFt=tgtFt; if(lock!==undefined) S.sizeLock=lock;
+    const g=R.fm.build(R.aspect,{depthScale:S.depthScale,Ds:srcM(),Dt:tgtM(),
+      scan:(S.useScan&&!S.scanning&&R.scan&&R.scan.model)?R.scan:null});
+    if(!g) return null;
+    const f=i=>probeFactor(i,srcM(),tgtM(),S.depthScale,g.norm,g.dRange);
+    const gs=S.sizeLock?1:clamp(srcM()/tgtM(),0.0015,60);
+    const cxy=g.center;
+    const radial=i=>Math.hypot(R.fm.U[i]-cxy[0],R.fm.V[i]-cxy[1]);
+    return {
+      nose:f(IDX.noseTip), sideL:f(IDX.sideL), sideR:f(IDX.sideR),
+      chin:f(IDX.chin), forehead:f(IDX.forehead), eyeL:f(IDX.irisL),
+      norm:g.norm, dRange:g.dRange, noseDepth:g.noseDepth,
+      globalScale:gs,
+      faceWidthScreen:g.faceWidthUnit*gs*((f(IDX.sideL)+f(IDX.sideR))/2)*R.viewSm.z,
+      noseR:radial(IDX.noseTip)*f(IDX.noseTip), sideR2:radial(IDX.sideR)*f(IDX.sideR),
+      yaw:g.yaw,pitch:g.pitch,roll:g.roll
+    };
+  },
+  step(){ resizeCanvas(); renderFrame(performance.now(), 1/60); },
+  pixels(){
+    const gl=R.ren.gl, w=R.canvas.width, h=R.canvas.height;
+    const px=new Uint8Array(w*h*4);
+    gl.readPixels(0,0,w,h,gl.RGBA,gl.UNSIGNED_BYTE,px);
+    let sum=0, sum2=0;
+    for(let i=0;i<px.length;i+=4){ sum+=px[i]; sum2+=px[i]*px[i]; }
+    return {sum, sum2, n:px.length/4, px};
+  },
+  diff(a,b){
+    let d=0, n=Math.min(a.px.length,b.px.length);
+    for(let i=0;i<n;i+=4) d+=Math.abs(a.px[i]-b.px[i]);
+    return d/(n/4);
+  }
+};
+window.FPS=FPS;
+
+/* go */
+if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",initializeApp);
+else initializeApp();
+</script>
+</body>
+</html>
