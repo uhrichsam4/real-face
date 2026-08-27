@@ -1163,10 +1163,14 @@ const NLM = 478;
    therefore resampled around the loop at a much higher angular rate, with more
    rings at closer radial spacing, so the surrounding mesh is as even as the
    face's own. */
-const RING_R = [1.09, 1.22, 1.38, 1.58, 1.84];   // radius, in face radii
-const RING_D = [0.78, 0.58, 0.38, 0.20, 0.07];   // share of the oval's own depth
-const RING_W = [0.92, 0.76, 0.56, 0.34, 0.14];   // warp weight in the debug overlay
-const RING_N = 96;                               // angular samples per ring
+const RING_R = [1.08, 1.19, 1.33, 1.51, 1.74];   // radius, as a multiple of the
+                                                 // oval's own radius at that angle
+const RING_D = [0.86, 0.70, 0.50, 0.28, 0.09];   // share of the oval's own depth
+const RING_W = [0.95, 0.86, 0.70, 0.46, 0.16];   // warp weight in the debug overlay
+const RING_N = 72;                               // 2x the 36-point oval: ring
+                                                 // vertices line up radially with
+                                                 // the oval landmarks, so the seam
+                                                 // triangles stay regular
 const NRING  = RING_R.length;
 const NV = NLM + NRING*RING_N;
 /* Mesh subdivision. MediaPipe gives 478 landmarks and that is all the *measured*
@@ -1246,6 +1250,8 @@ class FaceModel{
     const n=this.subCount, sU=this.sU, sV=this.sV, sZ=this.sZ, sN=this.sN, sW=this.sW;
     for(let i=0;i<NV;i++){
       sU[i]=this.U[i]; sV[i]=this.V[i]; sZ[i]=this.D[i]/kM;
+      /* the GPU takes this weight from the smoothly blurred coverage mask; mirror
+         that here so the wireframe does not show a step the render does not have */
       sW[i]= i<NLM ? 1 : RING_W[Math.min(NRING-1, ((i-NLM)/RING_N)|0)];
     }
     /* vertex normals over the base mesh, in (u, v, depth) unit space */
@@ -1351,7 +1357,23 @@ class FaceModel{
     const zRef = zsum/468;
 
     let dmax=0;
-    for(let i=0;i<NLM;i++){ D[i]=(zRef-Z[i])*kM; const a=Math.abs(D[i]); if(a>dmax)dmax=a; }
+    for(let i=0;i<NLM;i++){ D[i]=(zRef-Z[i])*kM; }
+    /* The silhouette is where the tracker's depth is least reliable: consecutive
+       oval landmarks disagree, and because every ring inherits that depth, the
+       error is projected outward and shows up as a zigzag crease running along
+       the face boundary. Smooth the depth along the loop first. */
+    {
+      const NO=FACE_OVAL.length;
+      const tmp=this._ovalTmp || (this._ovalTmp=new Float32Array(NO));
+      for(let pass=0; pass<2; pass++){
+        for(let k=0;k<NO;k++){
+          const a=FACE_OVAL[(k-1+NO)%NO], b=FACE_OVAL[k], c=FACE_OVAL[(k+1)%NO];
+          tmp[k]=0.25*D[a]+0.5*D[b]+0.25*D[c];
+        }
+        for(let k=0;k<NO;k++) D[FACE_OVAL[k]]=tmp[k];
+      }
+    }
+    for(let i=0;i<NLM;i++){ const a=Math.abs(D[i]); if(a>dmax)dmax=a; }
 
     // face centre (projection centre for the magnification)
     const cx=(U[IDX.sideL]+U[IDX.sideR]+U[IDX.forehead]+U[IDX.chin])/4;
@@ -1366,17 +1388,38 @@ class FaceModel{
       const t2=t*t, t3=t2*t;
       return 0.5*((2*p1) + (-p0+p2)*t + (2*p0-5*p1+4*p2-p3)*t2 + (-p0+3*p1-3*p2+p3)*t3);
     };
+    const rDir = this._rDir || (this._rDir=new Float32Array(RING_N*2));
+    const rRad = this._rRad || (this._rRad=new Float32Array(RING_N));
+    const rDep = this._rDep || (this._rDep=new Float32Array(RING_N));
+    const rTmp = this._rTmp || (this._rTmp=new Float32Array(RING_N));
     for(let k=0;k<RING_N;k++){
       const f=k*NO/RING_N, i1=Math.floor(f), tt=f-i1;
       const a=FACE_OVAL[(i1-1+NO)%NO], b=FACE_OVAL[i1%NO],
             c=FACE_OVAL[(i1+1)%NO],    d=FACE_OVAL[(i1+2)%NO];
-      const ox=cr(U[a],U[b],U[c],U[d],tt);
-      const oy=cr(V[a],V[b],V[c],V[d],tt);
-      const od=cr(D[a],D[b],D[c],D[d],tt);
-      const dx=ox-cx, dy=oy-cy;
+      const ox=cr(U[a],U[b],U[c],U[d],tt)-cx;
+      const oy=cr(V[a],V[b],V[c],V[d],tt)-cy;
+      const rad=Math.hypot(ox,oy)||1e-6;
+      rDir[k*2]=ox/rad; rDir[k*2+1]=oy/rad; rRad[k]=rad;
+      rDep[k]=cr(D[a],D[b],D[c],D[d],tt);
+    }
+    /* The oval is NOT convex — it notches inward at the ears and jaw. Scaling a
+       smooth resampling of it by a small factor therefore pushes some samples
+       INSIDE the oval there, and the rings cross the face mesh, producing a band
+       of overlapping slivers along the boundary. Smoothing the radius profile
+       around the loop and then taking max(smoothed, actual) makes each ring both
+       smooth and guaranteed to lie outside the oval at every angle. */
+    for(let pass=0; pass<4; pass++){
+      for(let k=0;k<RING_N;k++){
+        const a=rRad[(k-1+RING_N)%RING_N], b=rRad[k], c=rRad[(k+1)%RING_N];
+        rTmp[k]=0.25*a+0.5*b+0.25*c;
+      }
+      for(let k=0;k<RING_N;k++) rRad[k]=Math.max(rTmp[k], rRad[k]*0.985);
+    }
+    for(let k=0;k<RING_N;k++){
+      const dx=rDir[k*2], dy=rDir[k*2+1], rad=rRad[k], od=rDep[k];
       for(let r=0;r<NRING;r++){
-        const o=NLM+r*RING_N+k;
-        U[o]=cx+dx*RING_R[r]; V[o]=cy+dy*RING_R[r]; D[o]=od*RING_D[r];
+        const o=NLM+r*RING_N+k, R2=rad*RING_R[r];
+        U[o]=cx+dx*R2; V[o]=cy+dy*R2; D[o]=od*RING_D[r];
       }
     }
 
