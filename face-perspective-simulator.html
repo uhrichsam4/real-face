@@ -1156,9 +1156,19 @@ class Renderer{
    FACE MODEL — landmarks -> smoothed, metric-ish 3D facial structure
    ========================================================================== */
 const NLM = 478;
-const RING1 = 1.22, RING2 = 1.58;          // expansion rings around the face oval
-const RING1_D = 0.62, RING2_D = 0.24;      // their share of the oval's own depth
-const NV = NLM + FACE_OVAL.length*2;
+/* Expansion rings carry the warp outward from the face oval into hair, temples,
+   jaw and neck, fading to nothing. The oval itself is only 36 landmarks, so
+   rings built one-per-oval-point stay coarse however much the mesh is later
+   subdivided — the boundary reads as a ring of long, jagged triangles. They are
+   therefore resampled around the loop at a much higher angular rate, with more
+   rings at closer radial spacing, so the surrounding mesh is as even as the
+   face's own. */
+const RING_R = [1.09, 1.22, 1.38, 1.58, 1.84];   // radius, in face radii
+const RING_D = [0.78, 0.58, 0.38, 0.20, 0.07];   // share of the oval's own depth
+const RING_W = [0.92, 0.76, 0.56, 0.34, 0.14];   // warp weight in the debug overlay
+const RING_N = 96;                               // angular samples per ring
+const NRING  = RING_R.length;
+const NV = NLM + NRING*RING_N;
 /* Mesh subdivision. MediaPipe gives 478 landmarks and that is all the *measured*
    detail there is — subdividing does not invent new measurements. What it does
    is interpolate them on a curved surface instead of flat triangles, which makes
@@ -1236,7 +1246,7 @@ class FaceModel{
     const n=this.subCount, sU=this.sU, sV=this.sV, sZ=this.sZ, sN=this.sN, sW=this.sW;
     for(let i=0;i<NV;i++){
       sU[i]=this.U[i]; sV[i]=this.V[i]; sZ[i]=this.D[i]/kM;
-      sW[i]= i<NLM ? 1 : (i<NLM+FACE_OVAL.length ? 0.85 : 0.5);
+      sW[i]= i<NLM ? 1 : RING_W[Math.min(NRING-1, ((i-NLM)/RING_N)|0)];
     }
     /* vertex normals over the base mesh, in (u, v, depth) unit space */
     sN.fill(0);
@@ -1347,12 +1357,27 @@ class FaceModel{
     const cx=(U[IDX.sideL]+U[IDX.sideR]+U[IDX.forehead]+U[IDX.chin])/4;
     const cy=(V[IDX.sideL]+V[IDX.sideR]+V[IDX.forehead]+V[IDX.chin])/4;
 
-    // expansion rings so the warp blends into temples / hair / jaw / neck
-    for(let k=0;k<FACE_OVAL.length;k++){
-      const i=FACE_OVAL[k], o1=NLM+k, o2=NLM+FACE_OVAL.length+k;
-      const dx=U[i]-cx, dy=V[i]-cy;
-      U[o1]=cx+dx*RING1; V[o1]=cy+dy*RING1; D[o1]=D[i]*RING1_D;
-      U[o2]=cx+dx*RING2; V[o2]=cy+dy*RING2; D[o2]=D[i]*RING2_D;
+    /* Expansion rings, resampled smoothly around the oval loop.
+       The oval's 36 landmarks are interpolated with a closed Catmull-Rom spline
+       so each ring is a smooth curve rather than a 36-gon, and every ring shares
+       that same smooth parameterisation. */
+    const NO=FACE_OVAL.length;
+    const cr=(p0,p1,p2,p3,t)=>{
+      const t2=t*t, t3=t2*t;
+      return 0.5*((2*p1) + (-p0+p2)*t + (2*p0-5*p1+4*p2-p3)*t2 + (-p0+3*p1-3*p2+p3)*t3);
+    };
+    for(let k=0;k<RING_N;k++){
+      const f=k*NO/RING_N, i1=Math.floor(f), tt=f-i1;
+      const a=FACE_OVAL[(i1-1+NO)%NO], b=FACE_OVAL[i1%NO],
+            c=FACE_OVAL[(i1+1)%NO],    d=FACE_OVAL[(i1+2)%NO];
+      const ox=cr(U[a],U[b],U[c],U[d],tt);
+      const oy=cr(V[a],V[b],V[c],V[d],tt);
+      const od=cr(D[a],D[b],D[c],D[d],tt);
+      const dx=ox-cx, dy=oy-cy;
+      for(let r=0;r<NRING;r++){
+        const o=NLM+r*RING_N+k;
+        U[o]=cx+dx*RING_R[r]; V[o]=cy+dy*RING_R[r]; D[o]=od*RING_D[r];
+      }
     }
 
     // adaptive encoding range (smoothed so it doesn't pump frame to frame)

@@ -221,7 +221,7 @@ The model is stored in `localStorage` under the key `fps.facescan.v1` — on you
 
 ### Mesh density
 
-The landmark mesh is subdivided before it is used, so the depth field, the shaded 3D model and the exported `.obj` are built from a denser surface. **Mesh density** in the Advanced panel picks ×1 (1,071 triangles), ×4 (4,284, the default) or ×16 (17,136).
+The landmark mesh is subdivided before it is used, so the depth field, the shaded 3D model and the exported `.obj` are built from a denser surface. **Mesh density** in the Advanced panel picks ×1 (1,829 triangles), ×4 (7,316, the default) or ×16 (29,264).
 
 Subdivision is *curved*, not flat: a new vertex sits at the edge midpoint in the image plane — so the mesh stays pixel-aligned with the photo — but its depth is placed on the PN-triangle patch through the two parents and their normals,
 
@@ -237,6 +237,12 @@ taking the depth component of that offset. Flat midpoints would add triangles wi
 - **Distance slider**, 1 ft → 10,000 ft on a gamma-2.2 curve so roughly 60% of the travel covers the useful 1–20 ft range.
 - **Presets**: 1, 2, 3, 5, 10, 20, 50 ft and ∞.
 - **Live meta line**: source distance, target distance, equivalent framing in millimetres.
+
+### The blend rings
+
+Outside the face oval the warp has to fade into hair, temples, jaw and neck without a visible edge. That is done with five concentric rings at 1.09–1.84 face radii, carrying 78%, 58%, 38%, 20% and 7% of the oval's own depth.
+
+Each ring is resampled around the oval loop with a **closed Catmull-Rom spline at 96 points**, not one point per landmark. The oval is only 36 landmarks, so a ring built one-per-landmark stays coarse however much the mesh is later subdivided, and the boundary reads as a band of long, jagged triangles against the fine mesh on the face. Resampling makes the surrounding mesh as even as the face's own — longest edge is 3.2× the mean across the whole mesh, and the silhouette is a smooth curve rather than a 36-gon.
 
 ### Collapsing the panel
 
