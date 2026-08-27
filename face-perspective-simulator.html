@@ -567,8 +567,9 @@ body.immersive #panel .meta,body.immersive #advToggle,body.immersive .compare-ro
 
      m(0) = 1 (reference plane never moves), m > 1 for receding features when
      Dt > Ds (ears/sides grow), m < 1 for protruding features (nose shrinks) —
-     exactly real perspective compression. As Dt -> infinity, m -> Ds/(Ds - d),
-     the orthographic limit. With FACE SIZE LOCK off we simply multiply the
+     exactly real perspective compression. As Dt -> infinity, Dt/(Dt - d) -> 1
+     and m -> (Ds - d)/Ds: the orthographic limit, where every feature is scaled
+     only by its own depth. With FACE SIZE LOCK off we simply multiply the
      whole frame by Ds/Dt, which recovers the true fixed-focal-length result.
 
    RENDERING:
@@ -2842,10 +2843,11 @@ function wire(){
   /* keyboard */
   window.addEventListener("keydown",e=>{
     const t=e.target;
+    const k=(e.key||"").toLowerCase();
     if(t && (t.tagName==="INPUT"||t.tagName==="SELECT"||t.tagName==="TEXTAREA")){
-      if(!(e.key==="d"&&(e.metaKey||e.ctrlKey))) return;
+      /* compare the lowercased key: with Shift held e.key is "D", not "d" */
+      if(!(k==="d"&&(e.metaKey||e.ctrlKey))) return;
     }
-    const k=e.key.toLowerCase();
     if((k==="d" && (e.ctrlKey||e.metaKey) && e.shiftKey) || (k==="d" && !e.ctrlKey && !e.metaKey && !e.altKey)){
       S.debug=!S.debug; el.debug.classList.toggle("hide",!S.debug); e.preventDefault(); return;
     }
@@ -2901,8 +2903,20 @@ function initializeApp(){
   updateUI();
   resizeCanvas();
   requestAnimationFrame(loop);
-  /* warm the model up in the background so the first mode switch is fast */
-  setTimeout(()=>{ if(S.source==="none") R.tr.load().then(()=>{R.modelReady=true;}).catch(()=>{}); }, 400);
+  /* Warm the model up on the first sign of intent — hovering, focusing or
+     touching either intro button — rather than on load. Simply opening the
+     page then makes no third-party request at all, while the download still
+     starts before the click lands, so nothing feels slower. */
+  let warmed=false;
+  const warmModel=()=>{
+    if(warmed || S.source!=="none") return;
+    warmed=true;
+    R.tr.load().then(()=>{ R.modelReady=true; }).catch(()=>{});
+  };
+  ["pointerenter","pointerdown","touchstart","focus"].forEach(ev=>{
+    el.introCam.addEventListener(ev, warmModel, {passive:true});
+    el.introUpload.addEventListener(ev, warmModel, {passive:true});
+  });
 }
 
 /* ============================================================================

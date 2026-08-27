@@ -29,16 +29,18 @@ That's the whole thing — it's one self-contained file. (It fetches the face-tr
 
 ### The `file://` camera caveat
 
-Browsers only allow `getUserMedia` (camera access) from a **secure context**. Opening the file straight off disk gives you a `file://` page, and browsers disagree about whether that counts:
+Two things can behave differently when you open the file straight off disk, because a `file://` page has a **null origin**:
 
-| How you open it | Camera | Photo mode |
+- **The camera.** `getUserMedia` requires a secure context. Chromium explicitly lists `file://` as a trustworthy origin, and WebKit and Gecko also treat it as a secure context, so the camera generally works from disk — but this has varied by browser and version, and a browser may still decline. If it does, the app tells you and offers the photo path.
+- **The face model.** It is an ES module fetched cross-origin. Some browsers refuse a cross-origin module import from a null origin; the app has a fallback that fetches the source and re-imports it through a `blob:` URL, which covers most of those cases. If the model still cannot load, the photo is displayed unmodified and the app says why.
+
+| How you open it | Camera | Face tracking |
 |---|---|---|
-| **Chrome / Edge**, double-clicked from disk (`file://`) | Works — Chromium treats `file://` as a trustworthy origin | Works |
-| **Safari**, double-clicked from disk (`file://`) | Blocked | Works |
-| **Firefox**, from disk (`file://`) | Blocked in current versions | Works |
-| Any browser over `http://localhost` or `https://` | Works | Works |
+| From disk (`file://`) | Usually works; browser-dependent | Usually works via the `blob:` fallback |
+| `http://localhost` or any `https://` | Works | Works |
+| [The hosted build](https://uhrichsam4.github.io/real-face/) | Works | Works |
 
-Photo mode (upload, drag-and-drop, paste) works everywhere, including Safari from disk. If the camera is unavailable the app says so and offers the photo path instead.
+If anything misbehaves from disk, serve it locally or use the hosted URL — both are secure contexts with a real origin, and neither caveat applies.
 
 ### Serving it locally (works in every browser)
 
@@ -48,7 +50,7 @@ From the folder containing the file:
 python3 -m http.server 8000
 ```
 
-then open <http://localhost:8000/face-perspective-simulator.html>. `localhost` is a secure context, so the camera works in Safari and Firefox too.
+then open <http://localhost:8000/face-perspective-simulator.html>. `localhost` is a secure context with a real origin, so both caveats above disappear.
 
 ### GitHub Pages
 
@@ -138,7 +140,8 @@ The shader and the CPU path apply the same clamps, so nothing blows up at extrem
 - `Ds - d` and `Dt - d` are floored at 0.02 m (you cannot put the camera inside the nose).
 - `d` is clamped to `[-0.30 m, min(3 × dRange, 0.45 × min(Ds, Dt))]`.
 - `m` is clamped to `[0.45, 2.2]`.
-- A uniform-scale (Procrustes-style) normalisation factor is solved each frame over the landmark set and multiplied into `m`, so face size lock holds *exactly* regardless of where the depth reference plane happens to land.
+- `norm`, the Procrustes scale factor below, is itself clamped to `[0.5, 2]`.
+- A uniform-scale (Procrustes-style) normalisation factor is solved each frame by least squares over a 234-point subsample of the face landmarks and multiplied into `m`, so face size lock holds to within a fraction of a percent regardless of where the depth reference plane happens to land.
 - The magnification is applied radially about the **face centre** (the mean of the two cheekbone landmarks, the forehead and the chin), not about the image centre.
 
 ### Where `Ds` comes from
@@ -171,7 +174,7 @@ Five GPU passes per frame, all in WebGL.
 
 **5 · Overlay (optional).** Wireframe and landmark points, coloured by depth, drawn only when the mesh view is on.
 
-Supporting machinery: landmarks are smoothed with a **One Euro filter** (adaptive — heavy smoothing when still to kill jitter, light when moving to kill lag) and interpolated per render frame, while detection itself runs at 30 Hz independently of the render loop. WebGL context loss is caught and the renderer rebuilds itself.
+Supporting machinery: landmarks are smoothed with a **One Euro filter** (adaptive — heavy smoothing when still to kill jitter, light when moving to kill lag) and interpolated per render frame, while detection is rate-limited to 30 Hz inside the render loop, so rendering stays at display refresh even though tracking updates less often. WebGL context loss is caught and the renderer rebuilds itself.
 
 ---
 
@@ -265,7 +268,7 @@ Press the cube button (or **V**) to cycle **off → textured → shaded clay**. 
 | `S` | Save frame as PNG |
 | `R` | Reset |
 | `F` | Fullscreen |
-| `D` | Toggle the developer panel (also `Cmd`/`Ctrl` + `Shift` + `D`, which works while a control has focus) |
+| `D` | Toggle the developer panel. `Cmd`/`Ctrl` + `Shift` + `D` also works, and is the one shortcut that still fires while a slider or dropdown has keyboard focus — the single-letter shortcuts are ignored there so they don't fight the control. |
 
 Double-tap or double-click the image to toggle **immersive mode**, which fades the chrome away and leaves just the image and the slider. Entering fullscreen does the same.
 
@@ -279,7 +282,7 @@ A hidden self-test harness is exposed on `window.FPS` for verification work: `FP
 
 ## Privacy
 
-**No image, video frame, landmark, measurement or scan ever leaves your device.** There is no server, no upload endpoint, no analytics, no telemetry, no cookies, no accounts. Camera frames go from the camera into a WebGL texture and are never read back except when *you* press Save.
+**No image, video frame, landmark, measurement or scan ever leaves your device.** There is no server, no upload endpoint, no analytics, no telemetry, no cookies, no accounts. Camera frames go from the camera into a WebGL texture and are never read back except when *you* press **Save frame** or **Export .obj** — and both write only to your own download folder.
 
 The app does make exactly three kinds of outbound request, all of them to fetch code and model weights, all of them on first load only, and none of them carrying any of your data:
 
@@ -290,11 +293,11 @@ The app does make exactly three kinds of outbound request, all of them to fetch 
 | `cdn.jsdelivr.net` | `@mediapipe/tasks-vision@0.10.9` | Only if both of the above fail |
 | `storage.googleapis.com` | `face_landmarker.task` — the float16 landmark model | First load |
 
-These are plain static asset downloads. Nothing is sent *to* them. Once the browser has cached them the app runs without further network activity, and if they cannot be reached the app says so plainly and still displays your image unmodified.
+These are plain static asset downloads, and nothing is sent *to* them. They are requested only once you show intent — hovering, focusing or tapping one of the two start buttons — so simply opening the page contacts nobody. The model is served with a one-hour cache lifetime, so a later visit may re-request it; while it is cached the app runs with no network activity at all. If the hosts cannot be reached, the app says so plainly and still displays your image unmodified.
 
 The only thing persisted anywhere is your 3D face scan, in `localStorage` under `fps.facescan.v1`, on that browser on that device. "Clear scan" deletes it.
 
-If you want a fully offline build, download the three MediaPipe assets, host them alongside the HTML file, and edit the `MP_VERSIONS` and `MODEL_URLS` arrays near the top of the script to point at your local copies.
+If you want a fully offline build, mirror `vision_bundle.mjs`, the whole `wasm/` directory that ships with `@mediapipe/tasks-vision` (four files), and `face_landmarker.task`. Then point each `MP_VERSIONS` entry at your local **base directory** — the loader appends `/vision_bundle.mjs` and `/wasm` to it — and `MODEL_URLS` at your copy of the `.task` file. Both arrays are near the top of the script.
 
 ---
 
@@ -320,7 +323,7 @@ Stated honestly, because a simulation that hides its assumptions is worse than n
 ## Credits
 
 - **[MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker)** by Google — provides the 478-point face mesh that everything here is built on. The `@mediapipe/tasks-vision` package is licensed under the **Apache License 2.0**.
-- **`face_landmarker.task`** — the float16 face landmark model asset, distributed by Google via `storage.googleapis.com/mediapipe-models/`. See Google's model card for its intended use and its documented limitations.
+- **`face_landmarker.task`** — the float16 face landmark model asset, distributed by Google via `storage.googleapis.com/mediapipe-models/`. It is a bundle of several component models; see Google's [Face Landmarker model card](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker#models) for intended use and documented limitations. Google publishes no explicit licence for the model file itself, so this project links to it rather than redistributing it.
 - The perspective model, depth-field rendering, inverse warp, multi-view scan solver and interface in this file are original work.
 
 ## Licence
