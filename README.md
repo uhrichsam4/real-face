@@ -219,12 +219,28 @@ The model is stored in `localStorage` under the key `fps.facescan.v1` — on you
 - Automatic source-distance estimation on load, from EXIF or face size, always flagged as an estimate.
 - Helpful warnings when the face is cut off at the frame edge or too small for good results.
 
+### Mesh density
+
+The landmark mesh is subdivided before it is used, so the depth field, the shaded 3D model and the exported `.obj` are built from a denser surface. **Mesh density** in the Advanced panel picks ×1 (1,071 triangles), ×4 (4,284, the default) or ×16 (17,136).
+
+Subdivision is *curved*, not flat: a new vertex sits at the edge midpoint in the image plane — so the mesh stays pixel-aligned with the photo — but its depth is placed on the PN-triangle patch through the two parents and their normals,
+
+```
+mid = (Pa + Pb)/2 − ( ((Pb−Pa)·Na)·Na + ((Pa−Pb)·Nb)·Nb ) / 8
+```
+
+taking the depth component of that offset. Flat midpoints would add triangles without adding smoothness; this actually rounds the surface between landmarks. It does **not** add measured detail — MediaPipe gives 478 points either way — it interpolates them better.
+
 ### The main panel
 
 - **Distance readout** in feet and metres, with a plain-language label: `EXTREME CLOSE-UP` · `PHONE SELFIE DISTANCE` · `CLOSE PORTRAIT` · `SHORT PORTRAIT` · `NATURAL PORTRAIT` · `LONG PORTRAIT` · `COMPRESSED PERSPECTIVE` · `STRONGLY COMPRESSED` · `VERY FLAT PERSPECTIVE` · `NEARLY ORTHOGRAPHIC` · `ORTHOGRAPHIC LIMIT`.
 - **Distance slider**, 1 ft → 10,000 ft on a gamma-2.2 curve so roughly 60% of the travel covers the useful 1–20 ft range.
 - **Presets**: 1, 2, 3, 5, 10, 20, 50 ft and ∞.
 - **Live meta line**: source distance, target distance, equivalent framing in millimetres.
+
+### Collapsing the panel
+
+The chevron in the panel's top-right corner collapses the whole control surface to a small pill at the bottom showing the current value; tapping the pill brings it back. Collapsed, the image gets the entire screen, and the framing recomputes so the face re-centres in the space that just opened up.
 
 ### Comparison modes
 

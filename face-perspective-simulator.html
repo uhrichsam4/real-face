@@ -99,6 +99,7 @@ button{background:none;border:0;cursor:pointer}
   transition:opacity .35s var(--ease),transform .35s var(--ease);
 }
 .panel-inner{
+  position:relative;
   max-width:820px;margin:0 auto;
   background:var(--glass);backdrop-filter:blur(30px) saturate(1.7);-webkit-backdrop-filter:blur(30px) saturate(1.7);
   border:1px solid var(--stroke);border-radius:var(--r-lg);
@@ -109,6 +110,26 @@ button{background:none;border:0;cursor:pointer}
 }
 .row{display:flex;align-items:center;gap:10px}
 .row.center{justify-content:center}
+
+.pclose{
+  position:absolute;top:7px;right:9px;width:30px;height:30px;border-radius:50%;
+  display:grid;place-items:center;color:var(--dim2);background:rgba(120,120,128,.2);
+  transition:transform .14s var(--ease),background .2s;z-index:2
+}
+.pclose:hover{background:rgba(120,120,128,.34);color:#fff}
+.pclose:active{transform:scale(.88)}
+.pclose svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+#panelOpen{
+  position:absolute;left:50%;bottom:calc(16px + var(--sb));transform:translateX(-50%);z-index:21;
+  display:flex;align-items:center;gap:9px;padding:11px 18px;border-radius:999px;
+  background:var(--glass);backdrop-filter:blur(28px) saturate(1.6);-webkit-backdrop-filter:blur(28px) saturate(1.6);
+  border:1px solid var(--stroke);box-shadow:0 10px 32px rgba(0,0,0,.55);
+  font-size:15px;font-weight:600;color:#fff;font-variant-numeric:tabular-nums;
+  transition:transform .16s var(--ease),background .2s
+}
+#panelOpen:hover{background:var(--glass-2)}
+#panelOpen:active{transform:translateX(-50%) scale(.94)}
+#panelOpen svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;opacity:.65}
 
 /* segmented control */
 .seg{display:inline-flex;background:rgba(120,120,128,.24);border-radius:11px;padding:2px;gap:2px}
@@ -428,7 +449,10 @@ body.immersive #panel .meta,body.immersive #advToggle,body.immersive .compare-ro
   <!-- bottom control panel -->
   <section id="panel" class="hide">
     <div class="panel-inner">
-      <div class="row center compare-row" style="margin-bottom:2px">
+      <button class="pclose" id="panelClose" aria-label="Hide controls" title="Hide controls">
+      <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <div class="row center compare-row" style="margin-bottom:2px">
         <div class="seg" id="segCompare">
           <button data-v="sim" class="on">SIMULATED</button>
           <button data-v="orig">ORIGINAL</button>
@@ -474,6 +498,11 @@ body.immersive #panel .meta,body.immersive #advToggle,body.immersive .compare-ro
       <button class="p hide" id="scanDone">Use scan</button>
     </div>
   </div>
+
+  <button id="panelOpen" class="hide" aria-label="Show controls">
+    <span id="popenVal">3.0 ft</span>
+    <svg viewBox="0 0 24 24"><path d="M18 15l-6-6-6 6"/></svg>
+  </button>
 
   <!-- intro -->
   <div id="intro">
@@ -1130,6 +1159,12 @@ const NLM = 478;
 const RING1 = 1.22, RING2 = 1.58;          // expansion rings around the face oval
 const RING1_D = 0.62, RING2_D = 0.24;      // their share of the oval's own depth
 const NV = NLM + FACE_OVAL.length*2;
+/* Mesh subdivision. MediaPipe gives 478 landmarks and that is all the *measured*
+   detail there is — subdividing does not invent new measurements. What it does
+   is interpolate them on a curved surface instead of flat triangles, which makes
+   the depth field, the shaded 3D model and the exported mesh markedly smoother.
+   Each level multiplies triangle count by 4. */
+const SUB_LEVELS = [0,1,2];   // ×1, ×4, ×16
 
 class FaceModel{
   constructor(){
@@ -1144,11 +1179,104 @@ class FaceModel{
     this.depths = new Float32Array(NV);     // encoded depth 0..1
     this.tris   = null;
     this.triYaw = 999; this.triPitch = 999; this.triAt = 0;
+    /* subdivided mesh (built from this.tris, cached until the topology changes) */
+    this.subLevel=-1; this.subFor=null; this.subEdge=null; this.subTris=null; this.subCount=0;
+    this.sU=null; this.sV=null; this.sZ=null; this.sD=null; this.sW=null; this.sN=null;
+    this.sVerts=null; this.sDepths=null;
     this.dRangeSm = 0.05;
     this.geom = null;
   }
   reset(){ this.euro.reset(); this.hasDisp=false; this.tris=null; this.triYaw=999;
            this.fitSm=undefined; this.scanOk=undefined; this.scanRejected=false; }
+
+  /**
+   * Build the subdivision topology: each triangle becomes four, with a new
+   * vertex on every edge. Computed once per triangulation and reused; only the
+   * vertex attributes are recomputed per frame.
+   */
+  buildSubTopology(level){
+    if(this.subFor===this.tris && this.subLevel===level) return;
+    this.subFor=this.tris; this.subLevel=level;
+    let count=NV;
+    let tris=Array.from(this.tris);
+    const edges=[];
+    for(let L=0; L<level; L++){
+      const map=new Map(), out=[];
+      const mid=(a,b)=>{
+        const key = a<b ? a*131072+b : b*131072+a;
+        let m=map.get(key);
+        if(m===undefined){ m=count++; map.set(key,m); edges.push(a,b); }
+        return m;
+      };
+      for(let t=0;t<tris.length;t+=3){
+        const a=tris[t],b=tris[t+1],c=tris[t+2];
+        const ab=mid(a,b), bc=mid(b,c), ca=mid(c,a);
+        out.push(a,ab,ca, ab,b,bc, ca,bc,c, ab,bc,ca);
+      }
+      tris=out;
+      if(count>60000) break;                 // stay inside UNSIGNED_SHORT indices
+    }
+    this.subEdge=Int32Array.from(edges);
+    this.subTris=Uint16Array.from(tris);
+    this.subCount=count;
+    this.sU=new Float32Array(count); this.sV=new Float32Array(count);
+    this.sZ=new Float32Array(count); this.sD=new Float32Array(count);
+    this.sW=new Float32Array(count); this.sN=new Float32Array(count*3);
+    this.sVerts=new Float32Array(count*2); this.sDepths=new Float32Array(count);
+  }
+  /**
+   * Per-frame attributes for the subdivided mesh. New vertices sit at the edge
+   * midpoint in the image plane (so the mesh stays pixel-aligned with the photo)
+   * but their DEPTH is placed on the curved PN-triangle patch:
+   *     mid = (Pa+Pb)/2 - ( ((Pb-Pa)·Na)Na + ((Pa-Pb)·Nb)Nb ) / 8
+   * taking the depth component of that offset. Flat interpolation would add
+   * triangles without adding smoothness; this actually rounds the surface.
+   */
+  computeSub(kM, dR, A){
+    const n=this.subCount, sU=this.sU, sV=this.sV, sZ=this.sZ, sN=this.sN, sW=this.sW;
+    for(let i=0;i<NV;i++){
+      sU[i]=this.U[i]; sV[i]=this.V[i]; sZ[i]=this.D[i]/kM;
+      sW[i]= i<NLM ? 1 : (i<NLM+FACE_OVAL.length ? 0.85 : 0.5);
+    }
+    /* vertex normals over the base mesh, in (u, v, depth) unit space */
+    sN.fill(0);
+    const T=this.tris;
+    for(let t=0;t<T.length;t+=3){
+      const a=T[t],b=T[t+1],c=T[t+2];
+      const ux=sU[b]-sU[a], uy=sV[b]-sV[a], uz=sZ[b]-sZ[a];
+      const vx=sU[c]-sU[a], vy=sV[c]-sV[a], vz=sZ[c]-sZ[a];
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      sN[a*3]+=nx; sN[a*3+1]+=ny; sN[a*3+2]+=nz;
+      sN[b*3]+=nx; sN[b*3+1]+=ny; sN[b*3+2]+=nz;
+      sN[c*3]+=nx; sN[c*3+1]+=ny; sN[c*3+2]+=nz;
+    }
+    for(let i=0;i<NV;i++){
+      const l=Math.hypot(sN[i*3],sN[i*3+1],sN[i*3+2])||1;
+      sN[i*3]/=l; sN[i*3+1]/=l; sN[i*3+2]/=l;
+    }
+    /* generated vertices, in creation order (parents always precede children) */
+    const E=this.subEdge;
+    for(let k=0;k<E.length/2;k++){
+      const i=NV+k, a=E[k*2], b=E[k*2+1];
+      const ax=sU[a], ay=sV[a], az=sZ[a], bx=sU[b], by=sV[b], bz=sZ[b];
+      const dx=bx-ax, dy=by-ay, dz=bz-az;
+      const w1 = dx*sN[a*3] + dy*sN[a*3+1] + dz*sN[a*3+2];
+      const w2 = -(dx*sN[b*3] + dy*sN[b*3+1] + dz*sN[b*3+2]);
+      sU[i]=(ax+bx)*0.5;
+      sV[i]=(ay+by)*0.5;
+      sZ[i]=(az+bz)*0.5 - (w1*sN[a*3+2] + w2*sN[b*3+2])*0.125;
+      sW[i]=(sW[a]+sW[b])*0.5;
+      let nx=sN[a*3]+sN[b*3], ny=sN[a*3+1]+sN[b*3+1], nz=sN[a*3+2]+sN[b*3+2];
+      const l=Math.hypot(nx,ny,nz)||1;
+      sN[i*3]=nx/l; sN[i*3+1]=ny/l; sN[i*3+2]=nz/l;
+    }
+    for(let i=0;i<n;i++){
+      this.sD[i]=sZ[i]*kM;
+      this.sVerts[i*2]=sU[i]/A+0.5;
+      this.sVerts[i*2+1]=sV[i]+0.5;
+      this.sDepths[i]=clamp(0.5+0.5*(this.sD[i]/dR),0,1);
+    }
+  }
 
   /** feed one detection (array of {x,y,z} normalised landmarks) */
   ingest(lms, dt, smoothing){
@@ -1250,6 +1378,9 @@ class FaceModel{
       this.tris = delaunay(U,V,NV);
       this.triAt=now; this.triYaw=yaw; this.triPitch=pitch;
     }
+
+    this.buildSubTopology(clamp(opt.subLevel|0,0,2));
+    this.computeSub(kM, dR, A);
 
     // uniform-scale normalisation (Procrustes): guarantees FACE SIZE LOCK holds
     // exactly, independent of where the depth reference plane happens to sit.
@@ -1631,6 +1762,8 @@ const S = {
   scanning:false,
   gateScan:true,       // require a personal 3D scan before the simulator unlocks
   gateBypassed:false,  // set only when no camera exists to scan with
+  subLevel:1,          // mesh subdivision: 0 = x1, 1 = x4, 2 = x16
+  panelOpen:true,
   view3d:0,            // 0 = off, 1 = textured, 2 = shaded clay
   yaw3d:0, pitch3d:0, spin3d:true, spinT:0
 };
@@ -1653,6 +1786,7 @@ const el = {};
  "mainSlider","sliderMin","sliderMax","distMain","distMetric","distLabel","mSrc","mTgt","mFocal",
  "segCompare","btnHold","btnSource","btnMirror","btnAlign","btnMesh","btnSave","btnReset","btnFull",
  "btnScan","scanui","scanInstr","scanDots","scanBar","scanSub","scanCancel","scanDone","btn3d","hint3d",
+ "panelClose","panelOpen","popenVal",
  "introCam","introUpload","stage",
  "dFps","dFrame","dTfps","dLm","dConf","dTri","dGl","dSrc","dTgt","dRatio","dFocal","dFw","dNose",
  "dYaw","dPitch","dRoll","dvDepth","dvDepthV","dvFall","dvFallV","dvSmooth","dvSmoothV"
@@ -1911,6 +2045,16 @@ function buildAdvanced(){
   UI.depth=mkRange(0,2.5,0.01,S.depthScale,v=>{ S.depthScale=v; syncAdvanced(); });
   box.appendChild(row("Depth strength", UI.depth, UI.depthV));
 
+  UI.subV=mkVal();
+  UI.sub=mkSeg([{v:"0",label:"×1"},{v:"1",label:"×4"},{v:"2",label:"×16"}], String(S.subLevel), v=>{
+    S.subLevel=parseInt(v,10)||0; M3.dirty=true; syncAdvanced();
+  });
+  box.appendChild(row("Mesh density", UI.sub, UI.subV));
+  const subNote=document.createElement("div");
+  subNote.className="adv-note";
+  subNote.textContent="Subdivides the landmark mesh onto a curved surface. It does not add measured detail — MediaPipe gives 478 points either way — but it interpolates them smoothly instead of as flat triangles, which shows up in the depth field, the 3D model and the exported mesh.";
+  box.appendChild(subNote);
+
   UI.blendV=mkVal();
   UI.blend=mkRange(0.3,2.5,0.01,S.blend,v=>{ S.blend=v; syncAdvanced(); });
   box.appendChild(row("Face mesh blend", UI.blend, UI.blendV));
@@ -1979,6 +2123,8 @@ function syncAdvanced(){
     ? ("Using your scanned facial geometry (accuracy "+Math.round(R.scan.quality*100)+"%, "+Math.round(R.scan.span)+"° captured). Turn this off to compare against the single-frame depth estimate.")
     : "Depth is currently estimated from a single frame. Run a 3D scan with the live camera — turn your head slowly left and right — to measure your real facial depth and use it for both camera and photos.";
   UI.mode.querySelectorAll("button").forEach(b=>b.classList.toggle("on", b.dataset.v===S.ctlMode));
+  UI.sub.querySelectorAll("button").forEach(b=>b.classList.toggle("on", b.dataset.v===String(S.subLevel)));
+  UI.subV.textContent = R.fm && R.fm.subTris ? (R.fm.subTris.length/3).toLocaleString("en-US") : "—";
   el.dvDepth.value=S.depthScale; el.dvDepthV.textContent=S.depthScale.toFixed(2);
   el.dvFall.value=S.blend; el.dvFallV.textContent=S.blend.toFixed(2);
   el.dvSmooth.value=S.smoothing; el.dvSmoothV.textContent=S.smoothing.toFixed(2);
@@ -2033,6 +2179,7 @@ function updateUI(){
     el.distMetric.textContent = fmtFtShort(ft)+"  ·  "+fmtMetric(m);
   }
   el.distLabel.textContent = distanceLabel(ft);
+  el.popenVal.textContent = S.ctlMode==="distance" ? fmtFtShort(ft) : (Math.round(S.focalMm)+" mm");
   el.presets.querySelectorAll("button").forEach(b=>{
     b.classList.toggle("on", Math.abs(parseFloat(b.dataset.ft)-ft) < Math.max(0.02, ft*0.012));
   });
@@ -2077,7 +2224,9 @@ function updateDebug(){
 function freeAreaBias(){
   const vh=el.view.clientHeight||1;
   const top=el.topbar.classList.contains("hide")?0:el.topbar.offsetHeight;
-  const bot=el.panel.classList.contains("hide")?0:el.panel.offsetHeight;
+  const bot=el.panel.classList.contains("hide")
+    ? (el.panelOpen.classList.contains("hide")?0:el.panelOpen.offsetHeight+28)
+    : el.panel.offsetHeight;
   const f=(top + Math.max(vh-bot, top))/(2*vh);
   return 0.5-f;                     // >0 => move the face up on screen
 }
@@ -2133,7 +2282,7 @@ function imgToClip(u,v,out){
    ========================================================================== */
 const _inv=new Float32Array(4), _tmp=[0,0];
 let _lineXY=null,_lineV=null,_ptXY=null,_ptV=null;
-const _mx=new Float64Array(NV), _my=new Float64Array(NV);
+let _mx=new Float64Array(NV), _my=new Float64Array(NV);
 
 function presenceFade(now){
   if(S.source==="photo") return R.fm.hasDisp?1:0;
@@ -2152,14 +2301,14 @@ function renderFrame(now, dt){
   const fade=presenceFade(now);
   const Ds=srcM(), Dt=tgtM();
   const useScan = S.useScan && !S.scanning && R.scan && R.scan.model;
-  const geom = R.fm.hasDisp ? R.fm.build(R.aspect,{depthScale:S.depthScale,Ds,Dt,scan:useScan?R.scan:null}) : null;
+  const geom = R.fm.hasDisp ? R.fm.build(R.aspect,{depthScale:S.depthScale,Ds,Dt,scan:useScan?R.scan:null,subLevel:S.subLevel}) : null;
   if(S.scanning && geom && R.detected) scanTick(geom);
   computeView(geom, dt);
 
   if(S.view3d && geom){ drawModelView(geom, dt); return; }
   if(geom){
     const sig=0.17*S.blend*Math.max(geom.faceWidthUnit,0.02);
-    ren.buildField(R.fm.verts, R.fm.depths, R.fm.tris, sig/R.aspect, sig);
+    ren.buildField(R.fm.sVerts, R.fm.sDepths, R.fm.subTris, sig/R.aspect, sig);
   }
   const globalScale = S.sizeLock ? 1 : clamp(Ds/Dt, 0.0015, 60);
   ren.drawWarp({
@@ -2183,22 +2332,24 @@ function renderFrame(now, dt){
 }
 
 function drawMeshOverlay(geom, globalScale, strength){
-  const fm=R.fm, tris=fm.tris; if(!tris) return;
+  const fm=R.fm, tris=fm.subTris; if(!tris) return;
+  const NVS=fm.subCount;
   const nl=tris.length*2;
   if(!_lineXY||_lineXY.length<nl*2){ _lineXY=new Float32Array(nl*2); _lineV=new Float32Array(nl); }
-  if(!_ptXY){ _ptXY=new Float32Array(NV*2); _ptV=new Float32Array(NV); }
+  if(!_ptXY||_ptXY.length<NVS*2){ _ptXY=new Float32Array(NVS*2); _ptV=new Float32Array(NVS); }
+  if(!_mx||_mx.length<NVS){ _mx=new Float64Array(NVS); _my=new Float64Array(NVS); }
   const cx=geom.center[0], cy=geom.center[1];
   const dmaxP=Math.min(geom.dRange*3, 0.45*Math.min(srcM(),tgtM()));
-  const wOf=(i)=> i<NLM?1:(i<NLM+FACE_OVAL.length?0.85:0.5);
+  const wOf=(i)=> fm.sW[i];
   const X=_mx, Y=_my;
-  for(let i=0;i<NV;i++){
-    const d=clamp(fm.D[i]*S.depthScale,-0.30,dmaxP);
+  for(let i=0;i<NVS;i++){
+    const d=clamp(fm.sD[i]*S.depthScale,-0.30,dmaxP);
     const m=clamp(calcMagnification(d,srcM(),tgtM())*geom.norm,0.45,2.2);
     const g=(1+wOf(i)*strength*(m-1))*globalScale;
-    imgToClip(cx+(fm.U[i]-cx)*g, cy+(fm.V[i]-cy)*g, _tmp);
+    imgToClip(cx+(fm.sU[i]-cx)*g, cy+(fm.sV[i]-cy)*g, _tmp);
     X[i]=_tmp[0]; Y[i]=_tmp[1];
     _ptXY[i*2]=_tmp[0]; _ptXY[i*2+1]=_tmp[1];
-    _ptV[i]=clamp(0.5+0.5*(fm.D[i]/geom.dRange),0,1);
+    _ptV[i]=clamp(0.5+0.5*(fm.sD[i]/geom.dRange),0,1);
   }
   let k=0;
   for(let t=0;t<tris.length;t+=3){
@@ -2210,7 +2361,7 @@ function drawMeshOverlay(geom, globalScale, strength){
       _lineXY[k*2]=X[j]; _lineXY[k*2+1]=Y[j]; _lineV[k]=_ptV[j]; k++;
     }
   }
-  R.ren.drawOverlay(_lineXY,_lineV,k,_ptXY,_ptV,NV);
+  R.ren.drawOverlay(_lineXY,_lineV,k,_ptXY,_ptV,fm.subCount);
 }
 
 /* ---------------------------------------------------------------------------
@@ -2219,16 +2370,18 @@ function drawMeshOverlay(geom, globalScale, strength){
    ------------------------------------------------------------------------- */
 const M3 = {pos:null, uv:null, nrm:null, idx:null, srcTris:null, dirty:false};
 function buildModelArrays(geom){
-  const fm=R.fm, A=R.aspect, kM=geom.kMeters||1;
-
-  if(!M3.pos){ M3.pos=new Float32Array(NLM*3); M3.uv=new Float32Array(NLM*2); M3.nrm=new Float32Array(NLM*3); }
+  const fm=R.fm, A=R.aspect, kM=geom.kMeters||1, N=fm.subCount;
+  if(!M3.pos || M3.pos.length<N*3){
+    M3.pos=new Float32Array(N*3); M3.uv=new Float32Array(N*2); M3.nrm=new Float32Array(N*3);
+    M3.sum=new Float32Array(N); M3.cnt=new Uint16Array(N); M3.dirty=true;
+  }
   const cx=geom.center[0], cy=geom.center[1];
-  for(let i=0;i<NLM;i++){
-    M3.pos[i*3]  = fm.U[i]-cx;
-    M3.pos[i*3+1]= fm.V[i]-cy;
-    M3.pos[i*3+2]= fm.D[i]/kM;            // unit-space depth, + = toward viewer
-    M3.uv[i*2]   = fm.U[i]/A+0.5;
-    M3.uv[i*2+1] = fm.V[i]+0.5;
+  for(let i=0;i<N;i++){
+    M3.pos[i*3]  = fm.sU[i]-cx;
+    M3.pos[i*3+1]= fm.sV[i]-cy;
+    M3.pos[i*3+2]= fm.sZ[i];              // unit-space depth, + = toward viewer
+    M3.uv[i*2]   = fm.sU[i]/A+0.5;
+    M3.uv[i*2+1] = fm.sV[i]+0.5;
   }
   /* index list: face landmarks only, clipped to the face oval so the model has
      a clean silhouette instead of the triangulation's convex hull */
@@ -2241,13 +2394,12 @@ function buildModelArrays(geom){
     }
     return inside;
   };
-  if(M3.srcTris!==fm.tris || M3.dirty){
-    M3.srcTris=fm.tris; M3.dirty=false;
-    const keep=[];
-    for(let t=0;t<fm.tris.length;t+=3){
-      const a=fm.tris[t],b=fm.tris[t+1],c=fm.tris[t+2];
-      if(a>=NLM||b>=NLM||c>=NLM) continue;
-      const mx=(fm.U[a]+fm.U[b]+fm.U[c])/3, my=(fm.V[a]+fm.V[b]+fm.V[c])/3;
+  if(M3.srcTris!==fm.subTris || M3.dirty){
+    M3.srcTris=fm.subTris; M3.dirty=false;
+    const T=fm.subTris, keep=[];
+    for(let t=0;t<T.length;t+=3){
+      const a=T[t],b=T[t+1],c=T[t+2];
+      const mx=(fm.sU[a]+fm.sU[b]+fm.sU[c])/3, my=(fm.sV[a]+fm.sV[b]+fm.sV[c])/3;
       if(inOval(mx,my)) keep.push(a,b,c);
     }
     M3.idx=new Uint16Array(keep);
@@ -2258,9 +2410,7 @@ function buildModelArrays(geom){
      without moving the overall shape. (Display only — the warp uses the
      separately blurred depth field.) */
   {
-    const P=M3.pos, I=M3.idx;
-    const sum=M3.sum||(M3.sum=new Float32Array(NLM));
-    const cnt=M3.cnt||(M3.cnt=new Uint16Array(NLM));
+    const P=M3.pos, I=M3.idx, sum=M3.sum, cnt=M3.cnt;
     for(let pass=0; pass<2; pass++){
       sum.fill(0); cnt.fill(0);
       for(let t=0;t<I.length;t+=3){
@@ -2270,21 +2420,21 @@ function buildModelArrays(geom){
           sum[j]+=P[i*3+2]; cnt[j]++;
         }
       }
-      for(let i=0;i<NLM;i++) if(cnt[i]) P[i*3+2]=0.55*P[i*3+2]+0.45*(sum[i]/cnt[i]);
+      for(let i=0;i<N;i++) if(cnt[i]) P[i*3+2]=0.55*P[i*3+2]+0.45*(sum[i]/cnt[i]);
     }
   }
   M3.nrm.fill(0);
-  const P=M3.pos, N=M3.nrm, I=M3.idx;
+  const P=M3.pos, NR=M3.nrm, I=M3.idx;
   for(let t=0;t<I.length;t+=3){
     const a=I[t]*3,b=I[t+1]*3,c=I[t+2]*3;
     const ux=P[b]-P[a], uy=P[b+1]-P[a+1], uz=P[b+2]-P[a+2];
     const vx=P[c]-P[a], vy=P[c+1]-P[a+1], vz=P[c+2]-P[a+2];
     const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
-    N[a]+=nx;N[a+1]+=ny;N[a+2]+=nz; N[b]+=nx;N[b+1]+=ny;N[b+2]+=nz; N[c]+=nx;N[c+1]+=ny;N[c+2]+=nz;
+    NR[a]+=nx;NR[a+1]+=ny;NR[a+2]+=nz; NR[b]+=nx;NR[b+1]+=ny;NR[b+2]+=nz; NR[c]+=nx;NR[c+1]+=ny;NR[c+2]+=nz;
   }
-  for(let i=0;i<NLM;i++){
-    const l=Math.hypot(N[i*3],N[i*3+1],N[i*3+2])||1;
-    N[i*3]/=l; N[i*3+1]/=l; N[i*3+2]/=l;
+  for(let i=0;i<N;i++){
+    const l=Math.hypot(NR[i*3],NR[i*3+1],NR[i*3+2])||1;
+    NR[i*3]/=l; NR[i*3+1]/=l; NR[i*3+2]/=l;
   }
 }
 function drawModelView(geom, dt){
@@ -2662,10 +2812,21 @@ function needsScan(){
   return S.gateScan && !S.gateBypassed && !(R.scan && R.scan.model);
 }
 /** Show/hide the simulator chrome according to the gate. */
+/** panel visibility = the scan gate AND the user's collapse choice */
+function updatePanelChrome(){
+  const locked = needsScan(), none = (S.source==="none");
+  el.panel.classList.toggle("hide", locked || none || !S.panelOpen);
+  el.panelOpen.classList.toggle("hide", locked || none || S.panelOpen);
+}
+function setPanelOpen(v){
+  S.panelOpen=v;
+  updatePanelChrome();
+  R.viewInit=false;              // reframe: the free area just changed size
+}
 function updateLock(){
   const locked = needsScan();
   document.body.classList.toggle("gated", locked);
-  el.panel.classList.toggle("hide", locked || S.source==="none");
+  updatePanelChrome();
   if(R.lockedState!==locked){
     R.lockedState=locked;
     const sub=document.querySelector(".brand .privacy");
@@ -2819,7 +2980,7 @@ function exportModelOBJ(){
   if(!geom){ setStatus("No face to export","err",2200); return null; }
   buildModelArrays(geom);
   const P=M3.pos, UV=M3.uv, I=M3.idx, k=geom.kMeters||1;
-  const used=new Int32Array(NLM).fill(-1);
+  const used=new Int32Array(R.fm.subCount).fill(-1);
   let vs="", vts="", fs="", n=0;
   for(let t=0;t<I.length;t+=3){
     for(let e=0;e<3;e++){
@@ -2940,6 +3101,8 @@ function wire(){
   window.addEventListener("pointerup",holdOff);
   window.addEventListener("pointercancel",holdOff);
 
+  el.panelClose.addEventListener("click",()=>setPanelOpen(false));
+  el.panelOpen.addEventListener("click",()=>setPanelOpen(true));
   el.advToggle.addEventListener("click",()=>{
     const open=el.advanced.classList.toggle("open");
     el.advToggle.classList.toggle("open",open);
@@ -3132,7 +3295,7 @@ const FPS = {
   S,R,el,UI,
   calcMagnification, sliderToFt, ftToSlider, delaunay, FaceModel, distanceLabel,
   loadPhoto, similarityFit, jacobiTop4, FaceScan, startScan, cancelScan, set3d, M3,
-  needsScan, updateLock, finishScan, usePhotoSource, backToStart,
+  needsScan, updateLock, finishScan, usePhotoSource, backToStart, updateUI, setPanelOpen,
   exportModelOBJ, downloadModel, buildModelArrays,
   async demo(nose){
     const {pts,aspect}=synthLandmarks(nose);
@@ -3150,7 +3313,7 @@ const FPS = {
   /** geometry probe: radial factors for nose / cheek-side / chin at a distance */
   probe(srcFt,tgtFt,lock){
     S.srcFt=srcFt; S.tgtFt=tgtFt; if(lock!==undefined) S.sizeLock=lock;
-    const g=R.fm.build(R.aspect,{depthScale:S.depthScale,Ds:srcM(),Dt:tgtM(),
+    const g=R.fm.build(R.aspect,{depthScale:S.depthScale,Ds:srcM(),Dt:tgtM(),subLevel:S.subLevel,
       scan:(S.useScan&&!S.scanning&&R.scan&&R.scan.model)?R.scan:null});
     if(!g) return null;
     const f=i=>probeFactor(i,srcM(),tgtM(),S.depthScale,g.norm,g.dRange);
